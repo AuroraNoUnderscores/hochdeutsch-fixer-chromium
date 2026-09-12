@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Chromium API check</title>
+<body style="white-space:pre;font-family:monospace"></body>
+<script>
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  let fail = 0;
+  const check = (ok, what) => { if (!ok) { fail++; log('FAIL ' + what); } else log('ok   ' + what); };
+
+  // Minimal stub of the Chromium extension API.
+  const listeners = [];
+  window.__created = [];
+  window.chrome = {
+    runtime: {
+      getURL: p => new URL(p, location.href).href,
+      onMessage: { addListener: fn => listeners.push(fn) },
+      // Route a message to every listener but the sender, like Chromium does.
+      sendMessage: msg => new Promise(resolve => {
+        for (const fn of listeners) {
+          let answered = false;
+          const respond = v => { answered = true; resolve(v); };
+          if (fn(msg, {}, respond) === true) return;   // async responder
+          if (answered) return;
+        }
+        resolve(undefined);
+      }),
+    },
+    storage: { local: { get: async () => ({ llm: true }) }, onChanged: { addListener() {} } },
+    offscreen: {
+      hasDocument: async () => window.__created.length > 0,
+      createDocument: async o => { window.__created.push(o); },
+    },
+  };
+</script>
+<script src="../compat.js"></script>
+<script>
+  // compat.js must turn a promise-returning listener into sendResponse + true.
+  check(typeof browser === 'object' && browser.storage === chrome.storage, 'browser.* is mapped to chrome.*');
+  let asyncReply, syncReply;
+  browser.runtime.onMessage.addListener(msg => msg === 'async' ? Promise.resolve('A') : msg === 'sync' ? 'S' : undefined);
+  const compatListener = listeners[listeners.length - 1];
+  check(compatListener({ }, {}, () => {}) === false, 'listener returns false when it has no answer');
+  check(compatListener('async', {}, v => { asyncReply = v; }) === true, 'promise listener returns true');
+  check(compatListener('sync', {}, v => { syncReply = v; }) === true || syncReply === 'S', 'plain value answered directly');
+  listeners.length = 0; // drop the probe listener before the real ones load
+</script>
+<script type="module">
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  await import('../background.js');   // registers the service-worker listener
+  await import('../offscreen.js');    // registers the offscreen listener
+  await new Promise(r => setTimeout(r, 50));
+
+  const t0 = performance.now();
+  const status = await chrome.runtime.sendMessage({ type: 'llm-status' });
+  log(`status via relay: ${JSON.stringify(status)}`);
+
+  const jobs = [
+    { q: 0, key: 'ss:strasse', cf: true, texts: ['Wir wohnen an der Strasse.', 'Wir wohnen an der Straße.'] },
+    { q: 1, texts: ['Er musste eine Busse zahlen.', 'Er musste eine Geldstrafe zahlen.'] },
+  ];
+  const picks = await chrome.runtime.sendMessage({ type: 'rank', jobs });
+  log(`picks: ${JSON.stringify(picks)} in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+  log(`offscreen documents created: ${window.__created.length} (${window.__created[0]?.reasons})`);
+  const after = await chrome.runtime.sendMessage({ type: 'llm-status' });
+  log(`status after: ${JSON.stringify(after)}`);
+  log(JSON.stringify(picks) === '[1,1]' && window.__created.length === 1 ? '\nrelay works' : '\nFAIL relay');
+</script>
