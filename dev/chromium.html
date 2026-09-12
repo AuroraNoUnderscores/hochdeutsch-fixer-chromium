@@ -26,6 +26,7 @@
       }),
     },
     storage: { local: { get: async () => ({ llm: true }) }, onChanged: { addListener() {} } },
+    tabs: { onRemoved: { addListener() {} } },
     offscreen: {
       hasDocument: async () => window.__created.length > 0,
       createDocument: async o => { window.__created.push(o); },

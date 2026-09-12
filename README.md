@@ -104,15 +104,18 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
   words the model should judge, `phrases` for multi-word ones.
 - `cues`: words that decide an ambiguous case before the model is asked.
   `pro` picks the German replacement, `contra` keeps the original — both are
-  regexes matched against the text node and the block around it. This is how
-  "die Bussen für zu schnelles Fahren" becomes Geldstrafen while "die Bussen ab
-  dem Bahnhof" stays buses.
+  regexes matched against the text node first and the block around it second,
+  so a neighbouring note cannot decide this one. This is how "die Bussen für zu
+  schnelles Fahren" becomes Geldstrafen while "die Bussen ab dem Bahnhof" stays
+  buses.
+- `ssCues`: the same, for ss-words whose two spellings are both real words —
+  "die Masse des Fensters" are Maße, "die Masse strömte" is a crowd.
 
 ## Tests
 
 Served over HTTP (`py -m http.server 8766` in this folder):
 
-- `test.html` — rules only, no model, 67 cases.
+- `test.html` — rules only, no model, 83 cases.
 - `dev/e2e.html` — rules + model, 15 cases.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
 - `dev/bg.html` — background page: model loading, ranking, caching.
@@ -120,6 +123,8 @@ Served over HTTP (`py -m http.server 8766` in this folder):
   script, printing a before/after diff.
 - `dev/meta.html` — a real page about the words themselves (verstaendlich.ch on
   Mass/Masse/Massen), which must come out unchanged.
+- `dev/frames.html` — a page of short notes inside a sandboxed `srcdoc`
+  iframe, the shape artifacts and embedded readers use.
 - `dev/debug.html` — prints raw scores for candidate sentences.
 - `dev/chromium.html` — the compat shim, plus a real ranking round-trip through
   the service worker and the offscreen document with the `chrome` API stubbed.
@@ -128,6 +133,11 @@ Served over HTTP (`py -m http.server 8766` in this folder):
 
 ## Known limits
 
+- Frames: the extension runs in iframes too, including the `srcdoc` and `blob`
+  documents that artifacts and embedded readers use — those need an explicit
+  opt-in (`match_about_blank`, and `match_origin_as_fallback` on Chromium),
+  without which a browser injects nothing there. The popup adds up every frame
+  in the tab and says how many frames changed something.
 - Only the text you can see is changed; inputs and code blocks are left alone.
 - Language: text under `lang="de"` is always processed. Elsewhere — including a
   German email inside an English webmail interface, where `lang` describes the
