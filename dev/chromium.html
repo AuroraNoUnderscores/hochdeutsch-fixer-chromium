@@ -66,11 +66,14 @@
   log(`status after: ${JSON.stringify(after)}`);
   // the fine-tuned eszett model, bundled in /models, through the same relay
   // (this checks the plumbing, so the sentence is one the model is sure about)
-  const text = 'Die Masse strömte auf die Strasse. Das macht Spass.';
-  const offsets = [...text.matchAll(/ss/g)].map(m => m.index);
-  const [probs] = await chrome.runtime.sendMessage({ type: 'rank', jobs: [{ type: 'eszett', text, offsets }] });
+  const text = 'Die Masse strömte auf die Strasse. Das macht Spass. Theodor Heuss sprach.';
+  const offsets = [...text.matchAll(/ss/g)].map(m => m.index).slice(0, 3);
+  const heuss = [text.indexOf('Heuss'), text.indexOf('Heuss') + 5];
+  const [{ ss: probs, names }] = await chrome.runtime.sendMessage({ type: 'rank', jobs: [{ type: 'eszett', text, offsets, spans: [heuss] }] });
   const spelled = offsets.map((o, k) => text.slice(Math.max(0, o - 4), o) + (probs[k] > 0.5 ? 'ß' : 'ss'));
   log(`eszett via relay: ${spelled.join(' | ')}  (p ${probs.map(p => p.toFixed(2)).join(', ')})`);
-  const eszettOk = JSON.stringify(probs.map(p => p > 0.5)) === JSON.stringify([false, true, true]);
+  log(`names via relay: Heuss ${names?.[0]?.kind} ${names?.[0]?.p.toFixed(2)}`);
+  const eszettOk = JSON.stringify(probs.map(p => p > 0.5)) === JSON.stringify([false, true, true])
+    && names?.[0]?.kind === 'PER' && names[0].p > 0.5;
   log(JSON.stringify(picks) === '[1,1]' && window.__created.length === 1 && eszettOk ? '\nrelay works' : '\nFAIL relay');
 </script>
