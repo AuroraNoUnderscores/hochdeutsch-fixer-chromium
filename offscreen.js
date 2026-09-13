@@ -2,7 +2,7 @@
 // ranking requests relayed by the service worker, one at a time. Decisions are
 // cached; context-free ones (a word's ß spelling) by word, so a page full of
 // "Strasse" costs one call.
-import { load, score, MODEL } from './llm.js';
+import { load, score, eszett, MODEL } from './llm.js';
 
 const state = { status: 'idle', progress: 0, decided: 0, error: null, model: MODEL };
 const cache = new Map();
@@ -36,10 +36,15 @@ function ensure() {
 }
 
 async function rank(jobs) {
-  await ensure();
+  if (jobs.some(j => j.type !== 'eszett')) await ensure();
   chain = chain.then(async () => {
     const picks = [];
     for (const j of jobs) {
+      if (j.type === 'eszett') {                        // ss/ß for a whole text, one pass
+        picks.push(await eszett(j.text, j.offsets));
+        state.decided += j.offsets.length;
+        continue;
+      }
       const key = j.cf && j.key ? j.key : JSON.stringify(j.texts);
       if (cache.has(key)) { picks.push(cache.get(key)); continue; }
       const scores = await score(j.texts);

@@ -7,18 +7,15 @@ German language model running on your own machine settles the calls rules can't 
 ## Install
 
 `chrome://extensions` → turn on Developer mode → Load unpacked → pick this
-folder. It stays installed across restarts. Chrome may warn about an unpacked
-extension on each start; packing it (Pack extension, which produces a .crx and
-a key) or publishing it to the Web Store silences that.
+folder. It stays installed across restarts.
 
 This is the Chromium port of
 [hochdeutsch-fixer](https://github.com/AuroraNoUnderscores/hochdeutsch-fixer),
-which is the Firefox build. Everything that decides what gets rewritten is the
-same file on both sides.
+the Firefox build, where the model training lives (`training/`). Everything that
+decides what gets rewritten, including the bundled model, is identical on both
+sides and copied across with `bash sync.sh ../hochdeutsch-fixer`.
 
 ## What the port changes
-
-Chromium needs a different shell around the same logic:
 
 | | Firefox build | this build |
 | --- | --- | --- |
@@ -28,33 +25,42 @@ Chromium needs a different shell around the same logic:
 | Messaging | listener returns a promise | `sendResponse` + `return true` |
 | Icons | `icon.svg` | `icon16/48/128.png` |
 
-`compat.js` maps `browser.*` onto `chrome.*` and translates promise-returning
-message listeners into Chromium's `sendResponse` form, which is why
-`content.js`, `popup.js`, `engine.js`, `morph.js`, `dictionary.js` and `llm.js`
-are byte-identical to the Firefox repo and can be copied straight across:
-
-```bash
-bash sync.sh ../hochdeutsch-fixer     # pull shared files from the Firefox repo
-```
-
-A service worker cannot hold the model — Chromium stops it when idle, which
-would drop ~92 MB of weights every time — so `background.js` only relays
-ranking requests to an offscreen document, where the model stays loaded.
+A service worker cannot hold the models — Chromium stops it when idle — so
+`background.js` relays ranking requests to an offscreen document, where they
+stay loaded.
 
 ## How it works
 
 Two passes over every text node:
 
-1. **Rules** (`dictionary.js`, `morph.js`, `engine.js`) — run instantly. Where
-   they can't decide, they emit a *choice*: a list of candidate strings with a
-   safe default, so the page always reads correctly.
-2. **The baby LLM** (`llm.js`, hosted by `background.js`) — a German DistilBERT
-   (66M parameters, int8, ~92 MB), downloaded once from Hugging Face on first
-   use and cached. It scores each candidate sentence by pseudo-log-likelihood
-   (mask a token, ask how likely it is) and the best one replaces the default.
+1. **Rules** (`dictionary.js`, `morph.js`, `engine.js`) run instantly: vocabulary,
+   grammar, article agreement, and a first guess at every ss/ß. The page always
+   reads sensibly before any model has spoken.
+2. **Two small models** (`llm.js`, hosted by `offscreen.js`), both German
+   DistilBERT running locally on WASM, no GPU needed:
+   - **eszett** — fine-tuned for this extension to decide, for every "ss", whether
+     German spells it ß. Bundled in `models/hdfx-eszett` (64 MB). It reads each
+     text once and settles every ss/ß in it. How it was trained is in
+     [training/](https://github.com/AuroraNoUnderscores/hochdeutsch-fixer/tree/main/training).
+   - **general** — the untouched base model, downloaded once (~92 MB), which only
+     ranks the few remaining candidates: article forms and grammar wording.
 
-The model never writes text. It only ranks candidates the rules produced, so the
-worst it can do is pick the wrong one of them. It runs on WASM, no GPU needed.
+Neither model writes text: they choose among spellings and candidates the rules
+produced.
+
+### Why a trained model decides ss/ß, not rules
+
+On sentences from articles nobody tuned anything on, hand-written ss/ß rules got
+28.8 of every 1000 decisions wrong. The eszett model, trained on 1.17 million
+Wikipedia sentences whose correct spelling came for free (turn every ß into ss,
+and the original is the answer), gets 10.6 wrong end to end — including the
+collisions a list cannot settle: *die Masse strömte* vs *die Maße meines Koffers*,
+*ein Ass* vs *ich aß*, *keine Busse fahren* vs *eine Buße zahlen*.
+
+The rules' answer only stands where the model is unsure (probability between 0.4
+and 0.6), and a topic cue only outranks it for a spelling the model barely saw in
+training (`coverage.js`: plural "Bußen" occurred 3 times). On unseen text the
+cues are otherwise less reliable than the model.
 
 ### Text about words is left alone
 
@@ -72,23 +78,13 @@ at three levels, each reverting anything already changed:
   at most three words, is being named rather than used. A word is also left alone
   when the other spelling appears nearby, since the text is comparing them.
 
-### What the model is actually for
+### What the general model is for
 
-Measured on the 44 notes of the test artifact (`dev/key.html`): rules alone score
-43/44, rules plus model 44/44. The model is consulted 12 times across those notes
-and the model-heavy cases in `dev/e2e.html`, and overrules the rules 4 times.
-
-That is deliberate. Anything with a reliable signal — capitalisation, agreement,
-topic vocabulary — belongs in a rule, because a rule is inspectable and testable.
-The model is the fallback for what no list anticipated: an ss-word nobody wrote
-down, an unlisted ambiguous word, a case or wording choice. It is worth its 92 MB
-only if you meet such text; on a corpus the rules already cover it earns one word.
-
-To keep it honest it may only overrule a rule when clearly better, by a margin in
-nats that depends on what is at stake (`CONF` in `engine.js`): spelling and word
-choice 2.0, forms 0.5, grammar wording 0. Below that the rule's default stands, so
-an unsure model changes nothing rather than something wrong. The popup lists its
-last few decisions with their margins, and "Baby LLM" off makes it rules-only.
+It ranks candidates by how natural they sound, and may only overrule a rule when
+clearly better, by a margin in nats that depends on what is at stake (`CONF` in
+`engine.js`): word choice 2.0, forms 0.5, grammar wording 0. Below that the rule's
+default stands. The popup lists recent decisions with their margins, and "Baby
+LLM" off turns both models off (rules only).
 
 ### Swiss grammar, not just words
 
@@ -111,11 +107,10 @@ is ordinary German and stays.
 | --- | --- | --- |
 | Vocabulary, compounds, numbers, known ß stems | rules | unambiguous |
 | Articles, adjective endings, case and number after a gender change | rules, model picks when the case is ambiguous ("ein Keks" vs "einen Keks") | |
-| ß for any other word (Masse/Maße, Floss/Floß) | model | needs the context |
+| every ss/ß | eszett model, rules where it is unsure | measured 3× fewer errors than rules on unseen text |
 | Words that are also German with another meaning (Busse, Finken, tönen) | cue words in the surrounding block, else the model | the model only judges how a sentence sounds and cannot know a page is about speeding fines |
 | "zügeln" → "umziehen", incl. moving the particle to the clause end | model | word order |
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
-| ss/ß where capitalisation decides (Ass/aß, Schoß/schoss) | rules | German capitalises nouns |
 | Pronouns after a gender change ("Er war knapp" → "Sie war knapp") | rules | German pronouns agree with their antecedent; the model has no idea |
 
 ## Settings (toolbar popup)
@@ -128,7 +123,7 @@ is ordinary German and stays.
 
 ## Adding words
 
-Edit `dictionary.js`, then hit Reload in `about:debugging`.
+Edit `dictionary.js`, then hit the reload icon in `chrome://extensions`.
 
 - Nouns: `'Swiss/gender/plural = German/gender/plural | flags'`. Gender `m/f/n`,
   or `p` for plural-only; plural `-` means uncountable. Flags: `s` (also matches
@@ -136,27 +131,33 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
   (compound exceptions). Genders matter: they drive the article rewriting.
 - Everything else: `'swiss,forms>german,forms'` in `words`, `ambiguous` for
   words the model should judge, `phrases` for multi-word ones.
-- `cues`: words that decide an ambiguous case before the model is asked.
-  `pro` picks the German replacement, `contra` keeps the original — both are
-  regexes matched against the text node first and the block around it second,
-  so a neighbouring note cannot decide this one. This is how "die Bussen für zu
-  schnelles Fahren" becomes Geldstrafen while "die Bussen ab dem Bahnhof" stays
-  buses.
-- `ssCues`: the same, for ss-words whose two spellings are both real words —
-  "die Masse des Fensters" are Maße, "die Masse strömte" is a crowd.
+- `cues`: words that decide an ambiguous *vocabulary* case (Finken, Kasten,
+  tönen) before the general model is asked. `pro` picks the German replacement,
+  `contra` keeps the original — regexes matched against the sentence first, then
+  the text node, then the block around it.
+- `ssCues`: the same for ss-words with two real spellings (Busse/Buße,
+  Masse/Maße). These are the rules' fallback: the eszett model decides, and a cue
+  only outranks it for a spelling it barely saw in training, per `coverage.js`
+  (regenerate with `training/coverage.py` after changing the cue words). That is
+  how "die Bussen für zu schnelles Fahren" becomes Bußen.
 
 ## Tests
 
 Served over HTTP (`py -m http.server 8766` in this folder):
 
 - `test.html` — rules only, no model, 95 cases.
-- `dev/margins.html` — how confident the model is on every decision it makes.
+- `dev/margins.html` — how confident the general model is on every decision.
+- `dev/heldout.html?llm=1` — the whole engine on held-out Wikipedia sentences
+  (needs `training/data` from the Firefox repo), with errors split by whether the model or the rules decided.
+- `dev/offsets.html`, `dev/parity.html` — the browser feeds the eszett model
+  exactly as Python did in training, and gets the same probabilities.
 - `dev/key.html` — the 44 notes of the test artifact against its answer key
   (`dev/corpus.js`), rules plus model; `?mode=neutral` for the other flavour,
   `?llm=0` for rules only.
 - `dev/e2e.html` — rules + model, 15 cases.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
-- `dev/bg.html` — background page: model loading, ranking, caching.
+- `dev/chromium.html` — the compat shim, plus real ranking round-trips (general
+  and eszett model) through the service worker and the offscreen document.
 - `dev/chch.html` — a real page (ch.ch speeding fines) run through the content
   script, printing a before/after diff.
 - `dev/meta.html` — a real page about the words themselves (verstaendlich.ch on
@@ -164,8 +165,6 @@ Served over HTTP (`py -m http.server 8766` in this folder):
 - `dev/frames.html` — a page of short notes inside a sandboxed `srcdoc`
   iframe, the shape artifacts and embedded readers use.
 - `dev/debug.html` — prints raw scores for candidate sentences.
-- `dev/chromium.html` — the compat shim, plus a real ranking round-trip through
-  the service worker and the offscreen document with the `chrome` API stubbed.
 
 `test.js` also runs under `node test.js` if Node is available.
 
@@ -195,4 +194,7 @@ Served over HTTP (`py -m http.server 8766` in this folder):
 - The language-page detection is deliberately eager: a page that discusses
   spelling in passing is left untouched entirely, which is the safer of the two
   mistakes. The popup tells you when that is why nothing changed.
-- First use downloads ~92 MB. Until it finishes, choices keep their defaults.
+- The eszett model is bundled (64 MB); the general model downloads ~92 MB on first
+  use. Until they answer, the rules' spellings stand.
+- "die Masse des Fensters" still comes out as Masse: an encyclopedia rarely talks
+  about measuring a window, so that sense is under-represented in training.
