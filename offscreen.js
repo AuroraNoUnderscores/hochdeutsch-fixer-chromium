@@ -36,7 +36,10 @@ function ensure() {
 }
 
 async function rank(jobs) {
-  if (jobs.some(j => j.type !== 'eszett')) await ensure();
+  // The general model downloads; if it cannot (offline, blocked), the bundled
+  // eszett model still decides ss/ß and names, and the rules' defaults stand.
+  let general = true;
+  if (jobs.some(j => j.type !== 'eszett')) await ensure().catch(() => { general = false; });
   chain = chain.then(async () => {
     const picks = [];
     for (const j of jobs) {
@@ -45,7 +48,8 @@ async function rank(jobs) {
         state.decided += j.offsets.length;
         continue;
       }
-      const key = j.cf && j.key ? j.key : JSON.stringify(j.texts);
+      if (!general) { picks.push(null); continue; }
+      const key = j.cf && j.key ? j.key : JSON.stringify([j.texts, j.def, j.conf]);
       if (cache.has(key)) { picks.push(cache.get(key)); continue; }
       const scores = await score(j.texts);
       let best = scores.indexOf(Math.max(...scores));

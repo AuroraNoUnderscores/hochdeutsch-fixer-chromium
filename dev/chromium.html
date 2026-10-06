@@ -25,7 +25,10 @@
         resolve(undefined);
       }),
     },
-    storage: { local: { get: async () => ({ llm: true }) }, onChanged: { addListener() {} } },
+    storage: {
+      local: { get: async () => ({ llm: true }) }, onChanged: { addListener() {} },
+      session: (() => { const m = {}; return { get: async k => ({ [k]: structuredClone(m[k]) }), set: async o => { Object.assign(m, structuredClone(o)); }, remove: async k => { delete m[k]; } }; })(),
+    },
     tabs: { onRemoved: { addListener() {} } },
     offscreen: {
       hasDocument: async () => window.__created.length > 0,
@@ -76,4 +79,20 @@
   const eszettOk = JSON.stringify(probs.map(p => p > 0.5)) === JSON.stringify([false, true, true])
     && names?.[0]?.kind === 'PER' && names[0].p > 0.5;
   log(JSON.stringify(picks) === '[1,1]' && window.__created.length === 1 && eszettOk ? '\nrelay works' : '\nFAIL relay');
+
+  // What frames report is added up per tab, and kept in session storage: the
+  // service worker is stopped when idle, and its memory with it.
+  const call = (msg, sender) => new Promise(res => {
+    for (const fn of listeners) {
+      let done = false;
+      if (fn(msg, sender, v => { done = true; res(v); }) === true || done) return;
+    }
+    res(undefined);
+  });
+  await call({ type: 'count', count: 3, meta: false, changes: [['Velo', 'Fahrrad', 2]], names: [], top: true, href: 'https://a.ch/' }, { tab: { id: 7 }, frameId: 0 });
+  await call({ type: 'count', count: 2, meta: false, changes: [['Velo', 'Fahrrad', 1]], names: [['Spital', 1]], top: false, href: 'about:srcdoc' }, { tab: { id: 7 }, frameId: 3 });
+  const total = await call({ type: 'tab-count', tabId: 7 }, {});
+  log(`tab total: ${JSON.stringify(total)}`);
+  log(total?.count === 5 && total.frames === 2 && JSON.stringify(total.changes) === '[["Velo","Fahrrad",3]]'
+      && JSON.stringify(total.names) === '[["Spital",1]]' ? 'tab counts work' : 'FAIL tab counts');
 </script>
