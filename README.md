@@ -383,6 +383,10 @@ browser may cache scripts between edits, so reload hard):
 - PDFs built by a page (`blob:`) stay in Chrome's viewer, unconverted; so do
   PDFs a server sends as downloads (unless a site shows them in its own pdf.js
   viewer, above), and PDFs from disk while **Allow access to file URLs** is off.
+- In a PDF of more than 60 pages, text is converted for the pages around the
+  one you read (2 back, 6 ahead), following as you scroll, so find reaches
+  those; a shorter PDF is converted whole, nearest pages first, and find
+  reaches every page.
 - In a PDF, find highlights matches the way it does on any page, not PDFium's way.
   Pages are drawn by pdf.js, whose text is a shade heavier than PDFium's.
 - The viewer is the Chrome version `tools/sync_chrome_pdf.py` last copied it
