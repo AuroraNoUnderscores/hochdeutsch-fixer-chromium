@@ -3,8 +3,14 @@
 // pdfplugin.mjs as its plugin): before anything is shown, the text is
 // stopped, the page is replaced by the viewer, and the PDF's bytes are handed
 // to it. The text it shows is converted here (pdftext.js).
+//
+// A PDF on this computer (file://) arrives in Chrome's viewer, not as text: no
+// network rule reaches file:// addresses. Content scripts run there only with
+// "Allow access to file URLs"; then that viewer is replaced the same way, and
+// its bytes are read by the extension (offscreen.js), which may read files.
 (() => {
-  if (document.contentType !== 'text/plain') return;
+  const local = location.protocol === 'file:' && /^application\/(x-)?pdf$/i.test(document.contentType);
+  if (document.contentType !== 'text/plain' && !local) return;
   // nothing of the PDF's bytes is shown as text while the background answers
   const hide = document.createElement('style');
   hide.textContent = 'html { visibility: hidden !important; background: rgb(40, 40, 40) !important; }';
@@ -12,7 +18,7 @@
   if (document.documentElement) put();
   else new MutationObserver((_, o) => { if (document.documentElement) { o.disconnect(); put(); } }).observe(document, { childList: true });
 
-  chrome.runtime.sendMessage({ type: 'pdf-load' }).then(info => {
+  chrome.runtime.sendMessage({ type: 'pdf-load', local }).then(info => {
     if (!info) { hide.remove(); return; }
     window.stop();
     start(info).catch(err => { console.error('[Hochdeutsch-Fixer]', err); });
@@ -30,7 +36,7 @@
   async function start(info) {
     const { attrs, strings: s } = await strings();
     const ext = chrome.runtime.getURL('');
-    const streamUrl = `${location.origin}/hdfx-pdf-${crypto.randomUUID()}`;   // the viewer's name for this document
+    const streamUrl = `${local ? 'file://' : location.origin}/hdfx-pdf-${crypto.randomUUID()}`;   // the viewer's name for this document
     const root = document.documentElement;
     root.innerHTML = '<head><meta charset="utf-8"></head><body></body>';
     for (const a of [...root.attributes]) root.removeAttribute(a.name);
@@ -53,15 +59,15 @@
       head.append(el);
     }
     serveText();
-    sendBytes(streamUrl, info.length);
+    sendBytes(streamUrl, info.length, local);
     // the text engine comes with the page scripts, once the page is idle;
     // where Chrome leaves them out, they are asked for
-    setTimeout(() => { if (!globalThis.HD_ENGINE) chrome.runtime.sendMessage({ type: 'pdf-engine' }).catch(() => {}); }, 500);
+    setTimeout(() => { if (!globalThis.HD_ENGINE) chrome.runtime.sendMessage({ type: 'pdf-engine', local }).catch(() => {}); }, 500);
   }
 
   // The PDF's bytes: the page's own request was stopped, so they are fetched
   // again (from the cache where it can), and passed on as they arrive.
-  async function sendBytes(streamUrl, length) {
+  async function sendBytes(streamUrl, length, local) {
     const channel = new MessageChannel();
     const port = channel.port1;
     // the viewer asks once its plugin is there; the download starts now
@@ -71,6 +77,11 @@
       window.postMessage({ hdfxBytes: streamUrl }, '*', [channel.port2]);
     });
     try {
+      if (local) {
+        const data = await readFile(location.href.split('#')[0], p => port.postMessage({ progress: p }));
+        port.postMessage({ done: true, data: data.buffer }, [data.buffer]);
+        return;
+      }
       const r = await fetch(location.href, { credentials: 'include', cache: 'force-cache' });
       const total = +r.headers.get('content-length') || (length > 0 ? length : 0);
       const reader = r.body.getReader();
@@ -90,6 +101,34 @@
       console.error('[Hochdeutsch-Fixer]', err);
       port.postMessage({ done: true, data: null });
     }
+  }
+
+  // A file's bytes, from the extension's offscreen document (a page can't read
+  // files), in pieces: messages between them carry text, not bytes.
+  function readFile(url, progress) {
+    return new Promise((resolve, reject) => {
+      const port = chrome.runtime.connect({ name: 'hdfx-file' });
+      const parts = [];
+      let got = 0;
+      port.onMessage.addListener(msg => {
+        if (msg.error) { port.disconnect(); reject(new Error(msg.error)); return; }
+        if (msg.chunk != null) {
+          const bin = atob(msg.chunk), part = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) part[i] = bin.charCodeAt(i);
+          parts.push(part); got += part.byteLength;
+          if (msg.total) progress(Math.round(got / msg.total * 100));
+        }
+        if (msg.done) {
+          port.disconnect();
+          const data = new Uint8Array(got);
+          let at = 0;
+          for (const part of parts) { data.set(part, at); at += part.byteLength; }
+          resolve(data);
+        }
+      });
+      port.onDisconnect.addListener(() => reject(new Error('file reader gone')));
+      port.postMessage({ url });
+    });
   }
 
   function serveText() {

@@ -62,7 +62,18 @@ chrome.webRequest.onHeadersReceived.addListener(d => {
 }, { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame', 'object'] }, ['responseHeaders']);
 
 // Is this document a PDF that arrived here as text? Then: what the viewer needs.
-export async function pdfLoad(sender) {
+// A PDF on this computer is in Chrome's own viewer instead (local: pdfview.js
+// saw its document type, which no page can set); its bytes come from the
+// offscreen document, which must be there before pdfview.js asks it.
+export async function pdfLoad(sender, local, ensureOffscreen) {
+  if (local) {
+    if (!/^file:/i.test(sender.url || '')) return null;
+    const s = await chrome.storage.local.get(['enabled', 'pdf']);
+    if (s.enabled === false || s.pdf === false) return null;
+    await ensureOffscreen();
+    const frame = sender.frameId ?? 0;
+    return { url: sender.url.split('#')[0], length: -1, tabId: sender.tab?.id ?? -1, tabUrl: sender.tab?.url || sender.url, embedded: frame !== 0, local: true };
+  }
   const { pdfLoads = [] } = await chrome.storage.session.get('pdfLoads');
   pdfLoads.push(...recent);
   const tab = sender.tab?.id, frame = sender.frameId ?? 0;
