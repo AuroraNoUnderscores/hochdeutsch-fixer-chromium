@@ -65,7 +65,8 @@ chrome.webRequest.onHeadersReceived.addListener(d => {
 // A PDF on this computer is in Chrome's own viewer instead (local: pdfview.js
 // saw its document type, which no page can set); its bytes come from the
 // offscreen document, which must be there before pdfview.js asks it.
-export async function pdfLoad(sender, local, ensureOffscreen) {
+export async function pdfLoad(sender, local, ensureOffscreen, hosted) {
+  if (hosted) return hostedLoad(sender, hosted);
   if (local) {
     if (!/^file:/i.test(sender.url || '')) return null;
     const s = await chrome.storage.local.get(['enabled', 'pdf']);
@@ -80,4 +81,21 @@ export async function pdfLoad(sender, local, ensureOffscreen) {
   const load = [...pdfLoads].reverse().find(l => l.url === sender.url && (l.tabId < 0 || (l.tabId === tab && l.frameId === frame)));
   if (!load) return null;
   return { url: load.url, length: load.length, tabId: tab ?? -1, tabUrl: sender.tab?.url || load.url, embedded: frame !== 0 };
+}
+
+// A site's own pdf.js viewer (Nextcloud and polybox, ownCloud, and others that
+// ship pdf.js's viewer.html): pdf.js draws the pages itself, so the text could
+// only be changed in the invisible layer above them, out of step with what is
+// shown. pdfview.js replaces that viewer with this one, for the PDF it was
+// given in its ?file= parameter. Only a file on the viewer's own origin, as
+// pdf.js itself allows a hosted viewer, and only where PDFs are switched on.
+async function hostedLoad(sender, file) {
+  let page, url, top;
+  try { page = new URL(sender.url); url = new URL(file); top = new URL(sender.tab?.url || sender.url); } catch { return null; }
+  if (!/^https?:$/.test(page.protocol) || url.origin !== page.origin) return null;
+  const s = await chrome.storage.local.get(['enabled', 'disabledSites', 'pdf']);
+  const off = new Set((s.disabledSites || []).filter(Boolean));
+  if (s.enabled === false || s.pdf === false || off.has(page.hostname) || off.has(top.hostname)) return null;
+  const frame = sender.frameId ?? 0;
+  return { url: url.href, length: -1, tabId: sender.tab?.id ?? -1, tabUrl: sender.tab?.url || page.href, embedded: frame !== 0, hosted: true };
 }

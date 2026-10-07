@@ -227,6 +227,18 @@ but the extension's offscreen document may: it reads the file and hands it over
 in pieces. Chrome starts no workers on `file://` pages, so there pdf.js reads
 the PDF on the page itself.
 
+**PDFs in a site's own pdf.js viewer** — Nextcloud and polybox, ownCloud and
+other sites that serve pdf.js's `viewer.html?file=…` — are converted too. There
+pdf.js draws the pages itself, so a content script could only reach the
+invisible text layer above them: what you read stayed Swiss while what you
+selected, copied and found did not. `pdfview.js` recognises that viewer as it is
+parsed (its outer and viewer containers come before its scripts may run), stops
+it before pdf.js starts, and puts this viewer there with the same PDF: only a
+file on the viewer's own origin, as pdf.js itself allows a hosted viewer. The
+site's CSP still holds, and may allow no worker (polybox allows none), so pdf.js
+reads the PDF on the page, as for `file://`. A file that turns out not to be a
+PDF is given back to the site's viewer.
+
 Drawing (pen, highlighter, eraser, undo) and text boxes are kept by the plugin
 and saved as Ink and FreeText annotations when you download "with your changes";
 filled-in form fields are saved the same way. Save to Google Drive needs Chrome's
@@ -322,9 +334,13 @@ browser may cache scripts between edits, so reload hard):
   the extension loaded (`CHROME=…/chrome.exe py tools/pdf_check.py`): against
   Chrome's own viewer (toolbar pixels, page layout in every view, labels in
   German), then converted text, find on every page, save, print, links, Ctrl+zoom,
-  passwords, PDFs in frames, plain text left alone, the off switch, drawing and
+  passwords, PDFs in frames, a site's own pdf.js viewer replaced (`dev/pdf/hosted.html`,
+  with polybox's strict CSP), plain text left alone, the off switch, drawing and
   text boxes saved into the file, and a form filled in and saved. Test PDFs in
-  `dev/pdf/` (made by `dev/pdf/make.py` in the Firefox repo).
+  `dev/pdf/` (made by `dev/pdf/make.py` in the Firefox repo). It drives any
+  Chromium: `CHROME=/Applications/Vivaldi.app/Contents/MacOS/Vivaldi` runs it in Vivaldi.
+- `dev/pdf/text.test.mjs` and `dev/pdf/hooks.test.mjs` (`node …`) — how a PDF's
+  paragraphs are read and set again, and which drawn glyphs are swapped.
 
 `test.js` also runs under `node test.js` if Node is available.
 
@@ -361,8 +377,9 @@ browser may cache scripts between edits, so reload hard):
   capitalised and a past tense is not, so mid-sentence "Ass" stays an ace while
   "ass" becomes "aß", and "Schoss" becomes "Schoß" while "schoss" stays.
 
-- PDFs opened from disk (`file://`) or built by a page (`blob:`) stay in
-  Chrome's viewer, unconverted; so do PDFs a server sends as downloads.
+- PDFs built by a page (`blob:`) stay in Chrome's viewer, unconverted; so do
+  PDFs a server sends as downloads (unless a site shows them in its own pdf.js
+  viewer, above), and PDFs from disk while **Allow access to file URLs** is off.
 - In a PDF, find highlights matches the way it does on any page, not PDFium's way.
   Pages are drawn by pdf.js, whose text is a shade heavier than PDFium's.
 - The viewer is the Chrome version `tools/sync_chrome_pdf.py` last copied it

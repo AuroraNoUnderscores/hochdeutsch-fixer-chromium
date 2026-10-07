@@ -6,7 +6,7 @@ can be compared. Serves this folder itself; needs nothing but Python.
 
 The test PDFs are in dev/pdf/ (made by dev/pdf/make.py in the Firefox repo).
 """
-import functools, glob, http.server, json, os, struct, sys, tempfile, threading, time, urllib.request, zlib
+import functools, glob, http.server, json, os, struct, sys, tempfile, threading, time, urllib.parse, urllib.request, zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -249,12 +249,27 @@ def run(base, tmp):
         check('iframe, embed and object PDFs converted', len(got) == 3 and all('Fahranfänger' in g or 'Krankenhaus' in g for g in got),
               str([g[:40] for g in got]))
 
+        # 9b. A site's own pdf.js viewer (viewer.html?file=…, as Nextcloud and
+        #     polybox show PDFs) is replaced before pdf.js starts, though the
+        #     page's CSP allows it no worker; the drawn text is converted.
+        b.c.nav(base + 'hosted.html?file=swiss-arial.pdf'); time.sleep(3)
+        check('a site\'s pdf.js viewer is replaced', b.c.wait("!!document.querySelector('pdf-viewer')", 15))
+        check('…before pdf.js ran', b.c.js("document.documentElement.dataset.pdfjsRan") is None)
+        ok = b.c.wait(f"(() => {{ {DEEP} return /Fahranfänger/.test({TEXT}) && DEEP('.page canvas:not(.ink)').length > 0; }})()", 30)
+        check('…and its PDF opens converted', ok)
+        b.c.nav(base + 'hosted.html?file=plain.txt'); time.sleep(4)
+        check('a file that is not a PDF is left to the site\'s viewer', b.c.wait("document.documentElement.dataset.pdfjsRan === 'yes' && !document.querySelector('pdf-viewer')", 10))
+        b.c.nav(base + 'hosted.html?file=' + urllib.parse.quote('https://example.com/a.pdf', safe='')); time.sleep(2)
+        check('a file from another site is left to the site\'s viewer', b.c.js("document.documentElement.dataset.pdfjsRan === 'yes' && !document.querySelector('pdf-viewer')"))
+
         # 10. Text that is not a PDF stays text: a page cannot pass itself off as one.
         b.c.nav(base + 'plain.txt'); time.sleep(2)
         check('plain text stays plain text', b.js("!document.querySelector('pdf-viewer') && document.body.innerText.trim() === 'hello'"))
 
         # 11. Switched off in the popup: Chrome's own viewer again.
-        sw = [t for t in json.load(urllib.request.urlopen(f'http://127.0.0.1:{b.port}/json')) if t['type'] == 'service_worker']
+        # this extension's worker: Vivaldi has service workers of its own
+        sw = [t for t in json.load(urllib.request.urlopen(f'http://127.0.0.1:{b.port}/json'))
+              if t['type'] == 'service_worker' and t['url'].startswith(f'chrome-extension://{b.c.ext}/')]
         s = cdp.Socket(sw[0]['webSocketDebuggerUrl'])
         b.c.cmd('Runtime.evaluate', {'expression': "chrome.storage.local.set({ pdf: false })", 'awaitPromise': True}, sock=s)
         time.sleep(1)

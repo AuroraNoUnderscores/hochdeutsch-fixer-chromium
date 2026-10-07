@@ -146,8 +146,10 @@ const BG = 'rgb(40, 40, 40)';
 // Chrome starts no workers for a page from this computer (file://): there
 // pdf.js reads the PDF on the page itself (its worker code, loaded before the
 // first document is opened; not awaited here, the viewer must find the plugin).
+// So too in place of a site's pdf.js viewer: the site's own rules (CSP) still
+// hold there, and they may allow it no worker (polybox allows none).
 let workerReady = Promise.resolve();
-if (location.protocol === 'file:') workerReady = import(BASE + 'pdfjs/build/pdf.worker.mjs');
+if (location.protocol === 'file:' || cfg.hosted) workerReady = import(BASE + 'pdfjs/build/pdf.worker.mjs');
 else {
   const worker = new Worker(URL.createObjectURL(new Blob([`import ${JSON.stringify(BASE + 'pdfjs/build/pdf.worker.mjs')};`], { type: 'text/javascript' })), { type: 'module' });
   lib.GlobalWorkerOptions.workerPort = worker;
@@ -816,6 +818,7 @@ class Plugin {
   }
 
   fileName() {
+    if (cfg.fileName) return cfg.fileName;       // the server's name for it (a replaced pdf.js viewer)
     let name = '';
     try { name = decodeURIComponent(new URL(cfg.url).pathname.split('/').pop() || ''); } catch {}
     return name || 'document.pdf';
