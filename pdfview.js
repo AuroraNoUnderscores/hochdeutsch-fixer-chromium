@@ -8,13 +8,23 @@
 // network rule reaches file:// addresses. Content scripts run there only with
 // "Allow access to file URLs"; then that viewer is replaced the same way, and
 // its bytes are read by the extension (offscreen.js), which may read files.
+//
+// A site's own copy of pdf.js's viewer (viewer.html?file=…, as Nextcloud and
+// polybox show PDFs) draws the pages itself, where no content script can change
+// them: only the invisible text layer could be, so what is shown, selected and
+// found would disagree. That viewer is stopped before its scripts run and
+// replaced the same way, with the PDF named in its file parameter.
 (() => {
   const local = location.protocol === 'file:' && /^application\/(x-)?pdf$/i.test(document.contentType);
-  if (document.contentType !== 'text/plain' && !local) return;
+  const hosted = document.contentType === 'text/html' && hostedFile();
+  if (document.contentType !== 'text/plain' && !local && !hosted) return;
   // nothing of the PDF's bytes is shown as text while the background answers
   const hide = document.createElement('style');
   hide.textContent = 'html { visibility: hidden !important; background: rgb(40, 40, 40) !important; }';
   const put = () => (document.head || document.documentElement)?.append(hide);
+
+  if (hosted) { takeOver(hosted); return; }
+
   if (document.documentElement) put();
   else new MutationObserver((_, o) => { if (document.documentElement) { o.disconnect(); put(); } }).observe(document, { childList: true });
 
@@ -23,6 +33,69 @@
     window.stop();
     start(info).catch(err => { console.error('[Hochdeutsch-Fixer]', err); });
   }, () => hide.remove());
+
+  // The PDF a pdf.js viewer page is asked to show, as pdf.js reads it: the
+  // file parameter of its address. Only a file on the page's own origin, the
+  // one a hosted pdf.js viewer accepts. A page given back (below) is let be.
+  function hostedFile() {
+    if (!/^https?:$/.test(location.protocol)) return null;
+    const file = new URLSearchParams(location.search).get('file');
+    if (!file) return null;
+    let url;
+    try { url = new URL(file, location.href); } catch { return null; }
+    if (url.origin !== location.origin) return null;
+    try { if (sessionStorage.getItem('hdfx-pdf-returned') === location.href) return null; } catch {}
+    return url.href;
+  }
+
+  // Is this pdf.js's viewer? Its page says so as it is parsed: the scripts
+  // wait for the end of the page, and its outer and viewer containers come
+  // before that. Then it is stopped there, before pdf.js starts, and replaced.
+  function takeOver(file) {
+    let answer;            // the background's, which may come before the page or after
+    const asked = chrome.runtime.sendMessage({ type: 'pdf-load', hosted: file }).then(info => (answer = info || null), () => (answer = null));
+    const isViewer = () => document.getElementById('outerContainer')?.querySelector('#viewerContainer > #viewer.pdfViewer');
+    const watch = new MutationObserver(() => { if (isViewer()) seen(); });
+    watch.observe(document, { childList: true, subtree: true });
+    document.addEventListener('DOMContentLoaded', () => watch.disconnect(), { once: true });
+
+    async function seen() {
+      watch.disconnect();
+      if (answer === null) return;            // off here: pdf.js shows it as it is
+      // pdf.js must not start; the text engine leaves this page to the viewer
+      window.stop();
+      document.documentElement.setAttribute('data-hdfx-pdf', '');
+      put();
+      const info = answer === undefined ? await asked : answer;
+      // a viewer that wasn't to be replaced after all, or a file that is not a
+      // PDF: the page is given back to pdf.js, once
+      const back = () => {
+        try { sessionStorage.setItem('hdfx-pdf-returned', location.href); } catch {}
+        location.reload();
+      };
+      if (!info) return back();
+      let response;
+      try {
+        response = await fetch(info.url, { credentials: 'include' });
+        if (!response.ok || !/^application\/(x-)?pdf|^application\/octet-stream|^binary\//i.test(response.headers.get('content-type') || '')) throw new Error(`${response.status} ${response.headers.get('content-type')}`);
+      } catch (err) {
+        console.warn('[Hochdeutsch-Fixer] left to pdf.js:', info.url, err.message);
+        return back();
+      }
+      const name = fileName(response.headers.get('content-disposition'));
+      start({ ...info, ...(name ? { fileName: name } : {}) }, response).catch(err => { console.error('[Hochdeutsch-Fixer]', err); });
+    }
+  }
+
+  // The name a server gives its file (Content-Disposition), as Chrome reads it:
+  // filename* (RFC 5987) before filename.
+  function fileName(cd) {
+    if (!cd) return '';
+    const star = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(cd);
+    if (star) { try { return decodeURIComponent(star[2].trim()); } catch {} }
+    const plain = /filename\s*=\s*("((?:[^"\\]|\\.)*)"|[^;]+)/i.exec(cd);
+    return plain ? (plain[2] ?? plain[1]).replace(/\\(.)/g, '$1').trim() : '';
+  }
 
   async function strings() {
     const ui = chrome.i18n.getUILanguage();
@@ -33,7 +106,7 @@
     return { attrs: {}, strings: {} };
   }
 
-  async function start(info) {
+  async function start(info, response) {
     const { attrs, strings: s } = await strings();
     const ext = chrome.runtime.getURL('');
     const streamUrl = `${local ? 'file://' : location.origin}/hdfx-pdf-${crypto.randomUUID()}`;   // the viewer's name for this document
@@ -59,15 +132,16 @@
       head.append(el);
     }
     serveText();
-    sendBytes(streamUrl, info.length, local);
+    sendBytes(streamUrl, info.length, local, response);
     // the text engine comes with the page scripts, once the page is idle;
     // where Chrome leaves them out, they are asked for
-    setTimeout(() => { if (!globalThis.HD_ENGINE) chrome.runtime.sendMessage({ type: 'pdf-engine', local }).catch(() => {}); }, 500);
+    setTimeout(() => { if (!globalThis.HD_ENGINE) chrome.runtime.sendMessage({ type: 'pdf-engine', local, hosted: info.hosted ? info.url : undefined }).catch(() => {}); }, 500);
   }
 
   // The PDF's bytes: the page's own request was stopped, so they are fetched
-  // again (from the cache where it can), and passed on as they arrive.
-  async function sendBytes(streamUrl, length, local) {
+  // again (from the cache where it can), and passed on as they arrive. A
+  // replaced pdf.js viewer's file is already being fetched (response).
+  async function sendBytes(streamUrl, length, local, response) {
     const channel = new MessageChannel();
     const port = channel.port1;
     // the viewer asks once its plugin is there; the download starts now
@@ -82,7 +156,7 @@
         port.postMessage({ done: true, data: data.buffer }, [data.buffer]);
         return;
       }
-      const r = await fetch(location.href, { credentials: 'include', cache: 'force-cache' });
+      const r = response || await fetch(location.href, { credentials: 'include', cache: 'force-cache' });
       const total = +r.headers.get('content-length') || (length > 0 ? length : 0);
       const reader = r.body.getReader();
       const parts = [];

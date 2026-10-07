@@ -62,7 +62,10 @@ class Chrome:
         self.ext = None
         if extension:
             self.ext = self.cmd('Extensions.loadUnpacked', {'path': extension}, sock=self.browser)['id']
-        page = [t for t in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/json')) if t['type'] == 'page'][0]
+        # a tab of its own: the first page listed is not always a tab (Vivaldi's
+        # own interface is made of pages, and they never answer Page.enable)
+        tab = self.cmd('Target.createTarget', {'url': 'about:blank'}, sock=self.browser)['targetId']
+        page = [t for t in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/json')) if t['id'] == tab][0]
         self.page = Socket(page['webSocketDebuggerUrl'])
         self.cmd('Page.enable'); self.cmd('Runtime.enable'); self.cmd('Log.enable')
         self.cmd('Emulation.setDeviceMetricsOverride', {'width': width, 'height': height, 'deviceScaleFactor': 1, 'mobile': False})
