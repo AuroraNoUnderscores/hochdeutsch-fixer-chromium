@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!-- A site's own copy of pdf.js's viewer, as Nextcloud and polybox serve it
+     (viewer.html?file=…): its scripts in the head, its outer and viewer
+     containers in the body, and a strict CSP that allows the page no worker.
+     Its script stands in for pdf.js: if it ever runs, it says so. -->
+<html dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-hdfx' 'strict-dynamic'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; child-src 'self'">
+<title>PDF.js viewer</title>
+<script nonce="hdfx" type="module">
+  document.documentElement.dataset.pdfjsRan = 'yes';
+  document.getElementById('viewer')?.append('pdf.js was here');
+</script>
+</head>
+<body tabindex="1">
+<div id="outerContainer">
+  <div id="sidebarContainer"></div>
+  <div id="mainContainer">
+    <div class="toolbar"><div id="toolbarContainer">Automatischer Zoom</div></div>
+    <div id="viewerContainer" tabindex="0">
+      <div id="viewer" class="pdfViewer"></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
