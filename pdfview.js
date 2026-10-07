@@ -381,6 +381,7 @@
   }
 
   function serveText() {
+    HD_PDFTEXT.highlights();
     document.addEventListener('hdfx-pdf-req', e => {
       const { id, type, payload } = JSON.parse(e.detail);
       const reply = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-res', { detail: JSON.stringify({ id, data }) }));
