@@ -217,6 +217,16 @@ How, since no extension can reach Chrome's viewer:
    gaps, shadows, two-page rows) and draws them with the converted text, which
    `pdftext.js` and `pdfhooks.mjs` provide exactly as in the Firefox build.
 
+**PDFs on this computer** (`file://`) are converted too, once the extension's
+**Allow access to file URLs** switch is on (`chrome://extensions` → Details);
+only you can turn it on, and the popup offers a button that opens it when it is
+off. No network rule reaches a local file, so `pdfview.js` recognises Chrome's
+own viewer page for it (a document of type `application/pdf`, which no page can
+pose as) and replaces it in the same way. A content script may not read files,
+but the extension's offscreen document may: it reads the file and hands it over
+in pieces. Chrome starts no workers on `file://` pages, so there pdf.js reads
+the PDF on the page itself.
+
 Drawing (pen, highlighter, eraser, undo) and text boxes are kept by the plugin
 and saved as Ink and FreeText annotations when you download "with your changes";
 filled-in form fields are saved the same way. Save to Google Drive needs Chrome's
