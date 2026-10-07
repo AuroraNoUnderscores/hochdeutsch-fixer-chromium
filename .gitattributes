@@ -1,2 +1,6 @@
 # model files must reach the browser byte for byte
 models/** -text
+# pdf.js (synced from the Firefox repo), Chrome's PDF viewer (tools/sync_chrome_pdf.py), and the test PDFs
+pdfjs/** -text
+pdfviewer/** -text
+dev/pdf/*.pdf -text

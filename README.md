@@ -24,6 +24,7 @@ sides and copied across with `bash sync.sh ../hochdeutsch-fixer`.
 | Model host | persistent background page | offscreen document (`offscreen.js`) |
 | Messaging | listener returns a promise | `sendResponse` + `return true` |
 | Icons | `icon.svg` | `icon16/48/128.png` |
+| PDFs | the browser's pdf.js viewer, copied from it | Chrome's own viewer, copied from it, with a PDF plugin made of pdf.js (below) |
 
 A service worker cannot hold the models — Chromium stops it when idle — so
 `background.js` relays ranking requests to an offscreen document, where they
@@ -54,11 +55,16 @@ On sentences from articles nobody tuned anything on, hand-written ss/ß rules go
 28.8 of every 1000 decisions wrong. The eszett model is trained on 23 million
 sentences whose correct spelling came for free (turn every ß into ss, and the
 original is the answer): German Wikipedia plus everyday German from the web,
-cleaned of Swiss and misspelt pages. On held-out web text it gets 3.98 of 1000
-wrong, on held-out Wikipedia 5.66, including the collisions a list cannot settle:
-*die Masse strömte* vs *die Maße des Fensters*, *ein Ass* vs *ich aß*, *keine
-Busse fahren* vs *eine Buße zahlen*. Wikipedia alone was not enough: an
-encyclopedia hardly ever takes the measurements of a window.
+cleaned of Swiss and misspelt pages. On held-out web text it gets 3.67 of 1000
+wrong, including the collisions a list cannot settle: *die Masse strömte* vs *die
+Maße des Fensters*, *ein Ass* vs *ich aß*, *keine Busse fahren* vs *eine Buße
+zahlen*. Wikipedia alone was not enough: an encyclopedia hardly ever takes the
+measurements of a window.
+
+It is also trained on German sentences inside real Swiss paragraphs, so a
+Swiss-sounding page ("Das Kantonsspital Winterthur ...") does not make it keep
+"Grosse Teile", and on fines as Swiss text writes them ("muss eine Busse von 40
+Franken bezahlen"), which German text hardly ever does.
 
 The rules' answer only stands where the model is unsure (probability between 0.4
 and 0.6), and a topic cue only outranks it for a spelling the model barely saw in
@@ -182,6 +188,40 @@ preposition before a changed article where German contracts it ("in der Offerte"
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
 | Pronouns after a gender change ("Er war knapp" → "Sie war knapp") | rules | German pronouns agree with their antecedent; the model has no idea. Never in the noun's own clause ("Wegen dem Entscheid ärgert er sich" is a person), never the polite "Sie" |
 
+## PDFs
+
+PDFs are converted too, and look and behave as in Chrome's own viewer: same
+address, same toolbar in your language, same page layout and shadows, zoom
+(Ctrl + wheel, Ctrl +/-), two-page view, rotation, thumbnails, outline,
+properties, presentation, find, print, save, password prompt, form filling, and
+Chrome's drawing and text tools, saved into the file. With nothing to convert,
+`tools/pdf_check.py` compares it with Chrome's viewer: the toolbar is identical
+to the pixel, and every page sits where Chrome puts it in every view.
+
+How, since no extension can reach Chrome's viewer:
+
+1. **At the PDF's own address.** A `declarativeNetRequest` rule (`pdfnet.js`)
+   has a PDF arrive as plain text instead of going to Chrome's viewer: harmless
+   to show, never run as a page, and still at its own address. PDFs a server
+   sends as downloads, and PDFs on switched-off sites, are left alone.
+2. **Only real PDFs.** `pdfview.js` stops the text before anything shows, and
+   asks the background whether this document really arrived as a PDF (it noted
+   every PDF response); a text file, or a page posing as a PDF, gets nothing.
+3. **Chrome's viewer, copied from Chrome.** `tools/sync_chrome_pdf.py` takes
+   Chrome's viewer (its toolbar, sidebar, zoom, dialogs) from a running Chrome,
+   with its strings in all 55 languages Chrome has. The labels Chrome writes into
+   the files as it serves them are read at run time instead, in your language.
+4. **The plugin.** In Chrome, the viewer draws nothing itself; the PDF plugin
+   (PDFium) does. `pdfplugin.mjs` is that plugin, made of pdf.js: it answers the
+   viewer's messages as PDFium does, lays pages out as PDFium does (sizes,
+   gaps, shadows, two-page rows) and draws them with the converted text, which
+   `pdftext.js` and `pdfhooks.mjs` provide exactly as in the Firefox build.
+
+Drawing (pen, highlighter, eraser, undo) and text boxes are kept by the plugin
+and saved as Ink and FreeText annotations when you download "with your changes";
+filled-in form fields are saved the same way. Save to Google Drive needs Chrome's
+Google account, so that button is left out.
+
 ## Settings (toolbar popup)
 
 - **Enabled**, and a per-site switch. Turning it off restores the page without a reload.
@@ -194,6 +234,7 @@ preposition before a changed article where German contracts it ("in der Offerte"
   highlights, so the page's markup is not touched.
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
+- **PDFs too**: off leaves PDFs to Chrome's viewer, unconverted.
 
 ## Adding words
 
@@ -236,7 +277,7 @@ browser may cache scripts between edits, so reload hard):
 - `test.html` — rules only, no model, 160 cases.
 - `dev/real.html` — for the *installed* extension, nothing stubbed: the 44 notes
   of the answer key as a plain page, graded after 20 s (`?wait=`). The Firefox
-  build, installed into a fresh Firefox-engine profile, scores 42/44 there, the
+  build, installed into a fresh Firefox-engine profile, scores 43/44 there, the
   same as `dev/key.html`; this build has not been run in a real Chromium yet.
 - `dev/swiss.html` — the engine on real sentences from .ch pages
   (`training/data/names/ch.jsonl`, from the Firefox repo), before and after, for reading; `?base=old`
@@ -267,6 +308,13 @@ browser may cache scripts between edits, so reload hard):
 - `dev/frames.html` — a page of short notes inside a sandboxed `srcdoc`
   iframe, the shape artifacts and embedded readers use.
 - `dev/debug.html` — prints raw scores for candidate sentences.
+- `tools/pdf_check.py` — PDFs end to end in a headless Chrome for Testing with
+  the extension loaded (`CHROME=…/chrome.exe py tools/pdf_check.py`): against
+  Chrome's own viewer (toolbar pixels, page layout in every view, labels in
+  German), then converted text, find on every page, save, print, links, Ctrl+zoom,
+  passwords, PDFs in frames, plain text left alone, the off switch, drawing and
+  text boxes saved into the file, and a form filled in and saved. Test PDFs in
+  `dev/pdf/` (made by `dev/pdf/make.py` in the Firefox repo).
 
 `test.js` also runs under `node test.js` if Node is available.
 
@@ -303,6 +351,13 @@ browser may cache scripts between edits, so reload hard):
   capitalised and a past tense is not, so mid-sentence "Ass" stays an ace while
   "ass" becomes "aß", and "Schoss" becomes "Schoß" while "schoss" stays.
 
+- PDFs opened from disk (`file://`) or built by a page (`blob:`) stay in
+  Chrome's viewer, unconverted; so do PDFs a server sends as downloads.
+- In a PDF, find highlights matches the way it does on any page, not PDFium's way.
+  Pages are drawn by pdf.js, whose text is a shade heavier than PDFium's.
+- The viewer is the Chrome version `tools/sync_chrome_pdf.py` last copied it
+  from (`pdfviewer/VERSION`); rerun it after a Chrome update.
+
 - The model is small. It is good at spelling, articles and word choice in a
   sentence, and knows nothing about the world beyond that.
 - The language-page detection is deliberately eager: a page that discusses
@@ -314,10 +369,8 @@ browser may cache scripts between edits, so reload hard):
   moment before the model puts a name back.
 - Name misses: brand names built from Swiss words (VeloStrom, "Velo Pro") and
   names with a letter or number ("Natel A") can still be rewritten. On a
-  hand-labelled sample the model kept 21 of 30 such names and never kept an
+  hand-labelled sample the model kept 20 of 30 such names and never kept an
   ordinary word.
-- The model reads a paragraph at once. That usually helps, but in the long test
-  note "die Masse der Zuschauer" early on pulls "die Masse meines Koffers" later
-  to the crowd sense; and "Herzlichen Gruss aus Zürich" stays Gruss, because web
-  pages write "Gruss" often enough to muddle the labels. 42 of the 44 test notes
-  match their answer key.
+- "Herzlichen Gruss aus Zürich" stays Gruss, because web pages write "Gruss"
+  often enough to muddle the labels. 43 of the 44 test notes match their answer
+  key. Buses in a sentence about fines ("25 Euro für Busse") can become fines.

@@ -1,29 +1,84 @@
 {
   "manifest_version": 3,
   "name": "Hochdeutsch-Fixer",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "description": "Replaces Swiss Standard German (Velo, parkieren, Spass …) with German Standard German, with a Hamburg flavour and a local baby LLM for the tricky calls.",
   "minimum_chrome_version": "119",
-  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
-  "permissions": ["storage", "unlimitedStorage", "offscreen"],
-  "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "offscreen",
+    "declarativeNetRequest",
+    "webRequest",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "action": {
-    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    },
     "default_title": "Hochdeutsch-Fixer",
     "default_popup": "popup.html"
   },
-  "background": { "service_worker": "background.js", "type": "module" },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["compat.js", "dictionary.js", "morph.js", "coverage.js", "german_too.js", "engine.js", "content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "compat.js",
+        "dictionary.js",
+        "morph.js",
+        "coverage.js",
+        "german_too.js",
+        "engine.js",
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true,
       "match_origin_as_fallback": true
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "compat.js",
+        "pdftext.js",
+        "pdfview.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "pdfplugin.mjs",
+        "pdfhooks.mjs",
+        "pdfjs/*",
+        "pdfviewer/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

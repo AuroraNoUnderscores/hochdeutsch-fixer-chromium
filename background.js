@@ -1,6 +1,8 @@
 // Service worker. It cannot hold the model itself — Chromium stops it when idle,
 // which would unload ~92 MB of weights every time — so the model lives in an
 // offscreen document and this worker only relays messages to it.
+import { pdfLoad } from './pdfnet.js';
+
 const OFFSCREEN = 'offscreen.html';
 let creating = null;
 
@@ -66,6 +68,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg?.type === 'count') { counting = counting.then(() => noteCount(sender, msg)).catch(() => {}); return false; }
   if (msg?.type === 'tab-count') { counting.then(() => tabTotal(msg.tabId)).then(sendResponse, () => sendResponse(null)); return true; }
+
+  if (msg?.type === 'pdf-load') { pdfLoad(sender).then(sendResponse, () => sendResponse(null)); return true; }
+  // A PDF frame the text engine was not injected into: the page scripts wait
+  // for the frame to be idle, which a frame stopped early (pdfview.js) may never
+  // be. It is put there at once, for PDF frames only.
+  if (msg?.type === 'pdf-engine') {
+    pdfLoad(sender).then(load => {
+      if (!load || !sender.tab) return sendResponse(false);
+      const files = chrome.runtime.getManifest().content_scripts[0].js.filter(f => f !== 'content.js');
+      return chrome.scripting.executeScript({ target: { tabId: sender.tab.id, frameIds: [sender.frameId] }, files, injectImmediately: true })
+        .then(() => sendResponse(true));
+    }).catch(() => sendResponse(false));
+    return true;
+  }
 
   if (msg?.type === 'top-host') {
     let host = null;
