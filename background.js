@@ -69,12 +69,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'count') { counting = counting.then(() => noteCount(sender, msg)).catch(() => {}); return false; }
   if (msg?.type === 'tab-count') { counting.then(() => tabTotal(msg.tabId)).then(sendResponse, () => sendResponse(null)); return true; }
 
-  if (msg?.type === 'pdf-load') { pdfLoad(sender, msg.local === true, ensureOffscreen).then(sendResponse, () => sendResponse(null)); return true; }
+  if (msg?.type === 'pdf-load') { pdfLoad(sender, msg.local === true, ensureOffscreen, msg.hosted).then(sendResponse, () => sendResponse(null)); return true; }
   // A PDF frame the text engine was not injected into: the page scripts wait
   // for the frame to be idle, which a frame stopped early (pdfview.js) may never
   // be. It is put there at once, for PDF frames only.
   if (msg?.type === 'pdf-engine') {
-    pdfLoad(sender, msg.local === true, ensureOffscreen).then(load => {
+    pdfLoad(sender, msg.local === true, ensureOffscreen, msg.hosted).then(load => {
       if (!load || !sender.tab) return sendResponse(false);
       const files = chrome.runtime.getManifest().content_scripts[0].js.filter(f => f !== 'content.js');
       return chrome.scripting.executeScript({ target: { tabId: sender.tab.id, frameIds: [sender.frameId] }, files, injectImmediately: true })
