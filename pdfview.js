@@ -222,8 +222,12 @@
   // extension's version. Change any of these and it is another key. A page
   // answered before the model had spoken is shown from the cache at once and
   // converted again behind it.
-  const CACHE = 'pdfpage:', INDEX = 'pdfpage-index', KEEP = 4000;
-  let prefs = null, index = null, flushTimer = null;
+  // Any script on the page can send the viewer's requests, so what one page
+  // may do with the cache is limited: its keys include the site (no site
+  // learns which pages another one showed), and one viewer adds at most
+  // ADD_MAX pages, so no page can push everything else out.
+  const CACHE = 'pdfpage:', INDEX = 'pdfpage-index', KEEP = 4000, ADD_MAX = 1000;
+  let prefs = null, index = null, flushTimer = null, added = 0;
   const pending = new Map();        // written together, so the pages' content scripts hear one change, not hundreds
 
   // cyrb53: a fast 53-bit string hash with good avalanche (two 32-bit lanes)
@@ -241,12 +245,13 @@
 
   async function pageKey({ items, view }) {
     prefs ||= await chrome.storage.local.get(['mode', 'llm']);
-    const what = JSON.stringify([chrome.runtime.getManifest().version, prefs.mode || 'hamburg', prefs.llm !== false, view, items]);
+    const what = JSON.stringify([chrome.runtime.getManifest().version, location.origin, prefs.mode || 'hamburg', prefs.llm !== false, view, items]);
     // two seeds and the length: 106 bits and more, no two pages share a key in practice
     return CACHE + cyrb53(what).toString(36) + cyrb53(what, 0x9e3779b9).toString(36) + what.length.toString(36);
   }
 
   function keep(key, entry) {
+    if (!(key in index) && !pending.has(key) && ++added > ADD_MAX) return;
     pending.set(key, entry);
     index[key] = Date.now();
     clearTimeout(flushTimer);
@@ -274,7 +279,7 @@
     if (hit) {
       index[key] = Date.now();
       reply({ edits: hit.edits, version: hit.version });
-      if (hit.changes) HD_PDFTEXT.remember(payload.page, hit.changes);
+      if (hit.changes) HD_PDFTEXT.remember(payload.page, hit.changes, payload.items);
       if (hit.final) return;
     }
     // converted now: a final answer is kept as it is; one given before the
@@ -348,9 +353,17 @@
   }
 
   // A document's pages' text for its find bar, kept by the PDF's fingerprint
-  // (the same file, wherever it is opened), the 12 most recent documents.
+  // and the site it is opened on, the 12 most recent documents. The request
+  // may come from any script on the page: only a real fingerprint (pdf.js
+  // gives 32 hex digits) and text of a sensible size are taken, and a site
+  // reads only what was kept on that site, so it cannot ask whether a PDF was
+  // opened elsewhere.
+  const FIND_MAX_PAGES = 10000, FIND_MAX_CHARS = 8e6;
   async function findCache(fp, pages) {
-    const key = 'pdffind:' + String(fp).slice(0, 64), INDEX_KEY = 'pdffind-index';
+    if (typeof fp !== 'string' || !/^[0-9a-f]{32}$/i.test(fp)) return null;
+    if (pages && !(Array.isArray(pages) && pages.length <= FIND_MAX_PAGES && pages.every(t => typeof t === 'string')
+                   && pages.reduce((n, t) => n + t.length, 0) <= FIND_MAX_CHARS)) return null;
+    const key = 'pdffind:' + cyrb53(location.origin).toString(36) + ':' + fp.toLowerCase(), INDEX_KEY = 'pdffind-index';
     const { [INDEX_KEY]: idx = {} } = await chrome.storage.local.get(INDEX_KEY);
     if (!pages) {
       const got = (await chrome.storage.local.get(key))[key];
