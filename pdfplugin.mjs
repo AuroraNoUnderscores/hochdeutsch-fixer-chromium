@@ -143,8 +143,15 @@ const TYPEFACES = { 'sans-serif': 'Arial, sans-serif', serif: 'Times, serif', mo
 const GAP = 4;
 const BG = 'rgb(40, 40, 40)';
 
-const worker = new Worker(URL.createObjectURL(new Blob([`import ${JSON.stringify(BASE + 'pdfjs/build/pdf.worker.mjs')};`], { type: 'text/javascript' })), { type: 'module' });
-lib.GlobalWorkerOptions.workerPort = worker;
+// Chrome starts no workers for a page from this computer (file://): there
+// pdf.js reads the PDF on the page itself (its worker code, loaded before the
+// first document is opened; not awaited here, the viewer must find the plugin).
+let workerReady = Promise.resolve();
+if (location.protocol === 'file:') workerReady = import(BASE + 'pdfjs/build/pdf.worker.mjs');
+else {
+  const worker = new Worker(URL.createObjectURL(new Blob([`import ${JSON.stringify(BASE + 'pdfjs/build/pdf.worker.mjs')};`], { type: 'text/javascript' })), { type: 'module' });
+  lib.GlobalWorkerOptions.workerPort = worker;
+}
 
 class Plugin {
   constructor(viewer) {
@@ -223,6 +230,7 @@ class Plugin {
   }
 
   async open(password) {
+    await workerReady;
     const task = lib.getDocument({
       data: this.data.slice(), password,
       cMapUrl: BASE + 'pdfjs/web/cmaps/', cMapPacked: true, standardFontDataUrl: BASE + 'pdfjs/web/standard_fonts/',

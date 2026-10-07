@@ -80,3 +80,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'rank') { rank(msg.jobs).then(sendResponse, () => sendResponse(null)); return true; }
   return false;
 });
+
+// A PDF on this computer, for pdfview.js: an extension page may read file://
+// addresses once "Allow access to file URLs" is on, a content script may not.
+// Sent in pieces of base64, as messages between them carry text.
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== 'hdfx-file') return;
+  port.onMessage.addListener(({ url }) => {
+    if (typeof url !== 'string' || !url.startsWith('file:') || port.sender?.url?.split('#')[0] !== url) {
+      port.postMessage({ error: 'not this document' });
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = () => {
+      const data = new Uint8Array(xhr.response || new ArrayBuffer(0));
+      if (!xhr.response) { port.postMessage({ error: 'unreadable' }); return; }
+      const PIECE = 1 << 20;
+      for (let at = 0; at < data.byteLength; at += PIECE) {
+        const part = data.subarray(at, at + PIECE);
+        let bin = '';
+        for (let i = 0; i < part.length; i += 0x8000) bin += String.fromCharCode.apply(null, part.subarray(i, i + 0x8000));
+        port.postMessage({ chunk: btoa(bin), total: data.byteLength });
+      }
+      port.postMessage({ done: true });
+    };
+    xhr.onerror = () => port.postMessage({ error: 'unreadable' });
+    xhr.send();
+  });
+});
