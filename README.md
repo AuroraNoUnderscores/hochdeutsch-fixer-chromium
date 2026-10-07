@@ -256,7 +256,12 @@ Google account, so that button is left out.
 - **Baby LLM**: off = rules only, no download, no model.
 - **Highlight changes on page**: every changed word is tinted, and words the model
   kept because they are part of a name get a dotted blue underline. Uses CSS
-  highlights, so the page's markup is not touched.
+  highlights, so the page's markup is not touched. Point at a highlighted word
+  to see what the site wrote and why it changed: a Swiss word, Swiss ss/ß
+  spelling, the Hamburg flavour (with what Neutral would say), or the model's
+  pick and what it picked over; a kept name says what kind of name the model
+  took it for. The card sits in a closed shadow root and takes no pointer
+  events; Escape or scrolling hides it, a tap shows it on touch screens.
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
 - **PDFs too**: off leaves PDFs to Chrome's viewer, unconverted.
@@ -322,7 +327,7 @@ browser may cache scripts between edits, so reload hard):
 - `dev/e2e.html` — rules + model, 21 cases.
 - `dev/names.html` — names kept, ordinary words still changed, end to end.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
-- `dev/changes.html` — the changed-words list and the highlights, end to end.
+- `dev/changes.html` — the changed-words list, the highlights and the card shown on hover, end to end.
 - `dev/popup.html` — the popup with made-up data, to look at it without the extension.
 - `dev/chromium.html` — the compat shim, plus real ranking round-trips (general
   and eszett model, with names) through the service worker and the offscreen document.
