@@ -6,6 +6,7 @@
 //   with pages laid out as the plugin lays them out, drawn by pdf.js with the
 //   converted text (pdfhooks.mjs).
 import { onRedraw } from './pdfhooks.mjs';
+import { Find } from './pdffind.mjs';
 import './pdfjs/build/pdf.mjs';
 
 const lib = globalThis.pdfjsLib;
@@ -141,6 +142,9 @@ const INSET = { left: 5, top: 3, right: 5, bottom: 7 };
 // the fonts of the viewer's text box (getStyleForTypeface in pdfviewer/)
 const TYPEFACES = { 'sans-serif': 'Arial, sans-serif', serif: 'Times, serif', monospace: '"Courier New", monospace' };
 const GAP = 4;
+// Text converted ahead of drawing (textAround): all of a document up to this
+// many pages, else this many pages behind and ahead of the ones on screen.
+const TEXT_ALL = 60, TEXT_BEHIND = 2, TEXT_AHEAD = 6;
 const BG = 'rgb(40, 40, 40)';
 
 // Chrome starts no workers for a page from this computer (file://): there
@@ -251,6 +255,8 @@ class Plugin {
       const page = await this.doc.getPage(i + 1);
       this.pages.push({ page, el: null, canvas: null, scale: 0, text: null, links: false });
     }
+    // a long document has its own find (pdffind.mjs): the browser's sees only converted pages
+    if (n > TEXT_ALL) this.find ||= new Find(this);
     this.layout();
     this.post({ type: 'documentDimensions', ...this.dims });
     this.post({ type: 'rendererPreferencesUpdated', caretBrowsingEnabled: false });
@@ -261,7 +267,7 @@ class Plugin {
     this.post({ type: 'attachments', attachmentsData: [] });
     this.post({ type: 'loadProgress', progress: 100 });
     this.paintSoon();
-    this.textAll();
+    this.textAround();
   }
 
   async metadata() {
@@ -393,6 +399,7 @@ class Plugin {
 
   async paint() {
     if (!this.boxes) return;
+    if (this.pages.length > TEXT_ALL) this.textAround();     // the window follows the reader
     const want = new Set(this.visible());
     const dpr = devicePixelRatio || 1;
     for (const [i, p] of this.pages.entries()) {
@@ -445,9 +452,29 @@ class Plugin {
     p.el.append(div);
   }
 
-  // every page's text, so the find bar finds words on pages not drawn yet
-  async textAll() {
-    for (let i = 0; i < this.pages.length; i++) {
+  // Pages' text ahead of drawing, so the find bar finds words on pages not
+  // drawn yet: nearest to the reader first. A short document gets all of it; a
+  // long one only the pages around the reader, following as they scroll.
+  // Converting all 829 pages of a lecture script in order kept the page being
+  // read waiting behind every page before it, model calls included.
+  textAround() {
+    clearTimeout(this.textTimer);
+    this.textTimer = setTimeout(() => this.textRun(), 120);
+  }
+
+  async textRun() {
+    const run = (this.textGen = (this.textGen || 0) + 1);
+    const n = this.pages.length, seen = this.visible();
+    const first = seen.length ? Math.min(...seen) : 0, last = seen.length ? Math.max(...seen) : 0;
+    const from = n <= TEXT_ALL ? 0 : Math.max(0, first - TEXT_BEHIND);
+    const to = n <= TEXT_ALL ? n - 1 : Math.min(n - 1, last + TEXT_AHEAD);
+    const away = i => i < first ? first - i : i > last ? i - last : 0;
+    const order = [];
+    for (let i = from; i <= to; i++) order.push(i);
+    order.sort((a, b) => away(a) - away(b) || a - b);
+    for (const i of order) {
+      if (this.textGen !== run) return;          // the reader moved on: a new plan is coming
+      if (this.pages[i].text) continue;
       await this.text(i);
       await new Promise(r => setTimeout(r, 0));
     }
@@ -980,7 +1007,7 @@ class Plugin {
     // the viewer owns the scroll position: it is told, as PDFium tells it
     this.post({ type: 'setScrollPosition', x, y: b.y * this.zoom });
     this.paintSoon();
-    this.textAll();
+    this.textAround();
   }
 }
 

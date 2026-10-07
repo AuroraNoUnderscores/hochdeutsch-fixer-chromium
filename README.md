@@ -388,6 +388,21 @@ browser may cache scripts between edits, so reload hard):
 - PDFs built by a page (`blob:`) stay in Chrome's viewer, unconverted; so do
   PDFs a server sends as downloads (unless a site shows them in its own pdf.js
   viewer, above), and PDFs from disk while **Allow access to file URLs** is off.
+- A converted PDF page is kept in the extension's own storage (never the
+  site's), keyed by a hash of its text items, the flavour, the model switch and
+  the extension version, so a page seen before opens without the rules or the
+  model. A page drawn before the model had spoken is shown from there at once
+  and converted again behind it. The 4000 most recently used pages are kept.
+- In a PDF of more than 60 pages, text is converted for the pages around the
+  one you read (2 back, 6 ahead), following as you scroll; a shorter PDF is
+  converted whole, nearest pages first. A long PDF has its own find bar
+  (Ctrl+F, `pdffind.mjs`), since the browser's would see only converted pages:
+  it reads every page's text as the PDF has it, unconverted, and looks there
+  for the query in all its Swiss forms, the dictionary read backwards
+  ("Fahrradweg" is also "veloweg", "Handy" "natel", ß and ss are one letter).
+  A hit opens its page, which is converted, and the word is marked where it
+  now reads. The pages' text is kept per document (its fingerprint, the 12
+  most recent), so the same PDF is searched at once the next time.
 - In a PDF, find highlights matches the way it does on any page, not PDFium's way.
   Pages are drawn by pdf.js, whose text is a shade heavier than PDFium's.
 - The viewer is the Chrome version `tools/sync_chrome_pdf.py` last copied it

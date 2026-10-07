@@ -213,12 +213,166 @@
     });
   }
 
+  // ---------- a page converted once is kept ----------
+  // Converting a page costs the rules and, where they leave a choice, the
+  // model, and a lecture script is opened again and again. So a page's final
+  // answer is kept in the extension's own storage (never the site's), under a
+  // hash of exactly what it was made from: the page's text items with their
+  // positions and widths, the page box, the flavour, the model switch and the
+  // extension's version. Change any of these and it is another key. A page
+  // answered before the model had spoken is shown from the cache at once and
+  // converted again behind it.
+  const CACHE = 'pdfpage:', INDEX = 'pdfpage-index', KEEP = 4000;
+  let prefs = null, index = null, flushTimer = null;
+  const pending = new Map();        // written together, so the pages' content scripts hear one change, not hundreds
+
+  // cyrb53: a fast 53-bit string hash with good avalanche (two 32-bit lanes)
+  function cyrb53(str, seed = 0) {
+    let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  }
+
+  async function pageKey({ items, view }) {
+    prefs ||= await chrome.storage.local.get(['mode', 'llm']);
+    const what = JSON.stringify([chrome.runtime.getManifest().version, prefs.mode || 'hamburg', prefs.llm !== false, view, items]);
+    // two seeds and the length: 106 bits and more, no two pages share a key in practice
+    return CACHE + cyrb53(what).toString(36) + cyrb53(what, 0x9e3779b9).toString(36) + what.length.toString(36);
+  }
+
+  function keep(key, entry) {
+    pending.set(key, entry);
+    index[key] = Date.now();
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(flush, 1000);
+  }
+
+  // Pages written, and the oldest let go past KEEP. The index is merged with
+  // what other tabs wrote meanwhile, so none of their pages is lost track of.
+  async function flush() {
+    const stored = (await chrome.storage.local.get(INDEX))[INDEX] || {};
+    for (const [k, t] of Object.entries(stored)) if (!(index[k] >= t)) index[k] = t;
+    const keys = Object.keys(index);
+    const out = keys.length > KEEP ? keys.sort((a, b) => index[a] - index[b]).slice(0, keys.length - KEEP) : [];
+    for (const k of out) { delete index[k]; pending.delete(k); }
+    const write = Object.fromEntries(pending);
+    pending.clear();
+    await chrome.storage.local.set({ ...write, [INDEX]: index });
+    if (out.length) await chrome.storage.local.remove(out);
+  }
+
+  async function cachedPage(payload, reply, redraw) {
+    const key = await pageKey(payload);
+    index ||= (await chrome.storage.local.get(INDEX))[INDEX] || {};
+    const hit = pending.get(key) || (await chrome.storage.local.get(key))[key];
+    if (hit) {
+      index[key] = Date.now();
+      reply({ edits: hit.edits, version: hit.version });
+      if (hit.changes) HD_PDFTEXT.remember(payload.page, hit.changes);
+      if (hit.final) return;
+    }
+    // converted now: a final answer is kept as it is; one given before the
+    // model had spoken is kept too, marked to be converted again next time
+    let shown = hit?.version ?? -1;
+    const store = d => keep(key, d.changes ? { edits: d.edits, version: d.version, changes: d.changes, final: true }
+                                           : { edits: d.edits, version: d.version, final: false });
+    const answer = d => {
+      if (!hit || d.changes) store(d);
+      if (shown < 0) { shown = d.version; reply(d); }
+      else if (d.version > shown || d.changes) { shown = Math.max(shown, d.version); redraw({ page: payload.page, edits: d.edits, version: Math.max(d.version, hit ? hit.version + 1 : 0) }); }
+    };
+    await HD_PDFTEXT.convertPage(payload, answer, d => { store(d); redraw(d); });
+  }
+
+  // ---------- find in a long PDF ----------
+  // A long PDF's pages are converted only around the reader, so the browser's
+  // find cannot see the rest. The viewer's own find bar (pdfplugin.mjs) reads
+  // every page's text as the PDF has it, unconverted, and looks there for the
+  // query in all its Swiss forms: the dictionary read backwards. "Fahrrad"
+  // is looked for as "fahrrad" and "velo", "Fahrradweg" also as "veloweg",
+  // "parkt" also as "parkiert", "groß" as "gross" (ß and ss are one letter
+  // here). Every pair is a German form and the Swiss one it replaces.
+  const fold = s => s.normalize('NFKC').toLowerCase().replace(/ß/g, 'ss').replace(/\u00ad/g, '');
+  let pairs = null;
+  function swissPairs() {
+    const D = globalThis.HD_DICT;
+    if (!D) return [];
+    if (pairs) return pairs;
+    const out = new Map();
+    const add = (sw, de) => {
+      sw = fold(sw.replace(/[*+]/g, '').trim()); de = fold(de.replace(/[*+]/g, '').trim());
+      if (sw && de.length >= 3 && sw !== de) (out.get(de) || out.set(de, new Set()).get(de)).add(sw);
+    };
+    const forms = side => { const [w, , pl] = side.split('/'); return [w, ...(pl && pl !== '-' ? pl.split(',') : [])]; };
+    for (const list of [D.nouns, D.hamburg?.nouns]) for (const e of list || []) {
+      const [l, r] = e.split('|')[0].split('=').map(x => x.trim());
+      if (!r) continue;
+      const sw = forms(l), de = forms(r);
+      de.forEach((d, i) => { add(sw[Math.min(i, sw.length - 1)], d); add(sw[0], d); });
+    }
+    for (const list of [D.words, D.phrases, D.ambiguous, D.hamburg?.words, D.hamburg?.phrases]) for (const e of list || []) {
+      const [l, r] = e.split('>');
+      if (!r) continue;
+      const de = r.split(',');
+      l.split(',').forEach((s, i) => add(s, de[Math.min(i, de.length - 1)]));
+    }
+    for (const list of [D.verbs, D.hamburg?.verbs]) for (const [s, d] of list || []) add(s, d);
+    for (const list of [D.compounds, D.hamburg?.compounds]) for (const [s, d] of list || []) add(s, d);
+    // the longest German form first: "fahrräder" before "fahrrad"
+    return (pairs = [...out].sort((a, b) => b[0].length - a[0].length));
+  }
+
+  // The query and its Swiss forms, folded; none that only contains another
+  // (finding "velo" finds "velos" too).
+  function swissForms(query) {
+    const all = new Set([fold(query.trim())]);
+    for (let round = 0; round < 2; round++)
+      for (const v of [...all]) for (const [de, sws] of swissPairs()) {
+        const at = v.indexOf(de);
+        if (at < 0) continue;
+        for (const sw of sws) {
+          const f = v.slice(0, at) + sw + v.slice(at + de.length);
+          all.add(f);
+          if (f.startsWith('ge') && sws.size && /ier/.test(sw)) all.add(f.slice(2));   // geparkt -> parkiert
+        }
+        if (all.size > 32) break;
+      }
+    const list = [...all].filter(Boolean);
+    return list.filter(v => !list.some(u => u !== v && v.includes(u)));
+  }
+
+  // A document's pages' text for its find bar, kept by the PDF's fingerprint
+  // (the same file, wherever it is opened), the 12 most recent documents.
+  async function findCache(fp, pages) {
+    const key = 'pdffind:' + String(fp).slice(0, 64), INDEX_KEY = 'pdffind-index';
+    const { [INDEX_KEY]: idx = {} } = await chrome.storage.local.get(INDEX_KEY);
+    if (!pages) {
+      const got = (await chrome.storage.local.get(key))[key];
+      if (got) { idx[key] = Date.now(); await chrome.storage.local.set({ [INDEX_KEY]: idx }); }
+      return got || null;
+    }
+    idx[key] = Date.now();
+    const old = Object.keys(idx).sort((a, b) => idx[a] - idx[b]).slice(0, Math.max(0, Object.keys(idx).length - 12));
+    for (const k of old) delete idx[k];
+    await chrome.storage.local.set({ [key]: pages, [INDEX_KEY]: idx });
+    if (old.length) await chrome.storage.local.remove(old);
+  }
+
   function serveText() {
     document.addEventListener('hdfx-pdf-req', e => {
       const { id, type, payload } = JSON.parse(e.detail);
       const reply = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-res', { detail: JSON.stringify({ id, data }) }));
       const redraw = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-redraw', { detail: JSON.stringify(data) }));
-      if (type === 'page') HD_PDFTEXT.convertPage(payload, reply, redraw).catch(err => { console.error('[Hochdeutsch-Fixer]', err); reply({ edits: [], version: 0 }); });
+      if (type === 'swiss-forms') return reply(swissForms(payload.query || ''));
+      if (type === 'find-cache-get') return findCache(payload.fp).then(reply, () => reply(null));
+      if (type === 'find-cache-set') return findCache(payload.fp, payload.pages).then(() => reply(true), () => reply(false));
+      if (type === 'page') cachedPage(payload, reply, redraw).catch(err => { console.error('[Hochdeutsch-Fixer]', err); reply({ edits: [], version: 0 }); });
     });
     browser.runtime.onMessage.addListener(msg => {
       if (msg === 'hd-status' && window.top === window)
