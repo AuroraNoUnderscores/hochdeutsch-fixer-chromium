@@ -23,6 +23,15 @@
   hide.textContent = 'html { visibility: hidden !important; background: rgb(40, 40, 40) !important; }';
   const put = () => (document.head || document.documentElement)?.append(hide);
 
+  // The page cache's and the find's state (below), declared before anything
+  // returns: a replaced pdf.js viewer returns here, and its pages use them later.
+  const CACHE = 'pdfpage:', INDEX = 'pdfpage-index', KEEP = 4000, ADD_MAX = 1000;
+  let prefs = null, index = null, flushTimer = null, added = 0;
+  const pending = new Map();        // written together, so the pages' content scripts hear one change, not hundreds
+  const fold = s => s.normalize('NFKC').toLowerCase().replace(/ß/g, 'ss').replace(/\u00ad/g, '');
+  let pairs = null;
+  const FIND_MAX_PAGES = 10000, FIND_MAX_CHARS = 8e6;
+
   if (hosted) { takeOver(hosted); return; }
 
   if (document.documentElement) put();
@@ -226,9 +235,6 @@
   // may do with the cache is limited: its keys include the site (no site
   // learns which pages another one showed), and one viewer adds at most
   // ADD_MAX pages, so no page can push everything else out.
-  const CACHE = 'pdfpage:', INDEX = 'pdfpage-index', KEEP = 4000, ADD_MAX = 1000;
-  let prefs = null, index = null, flushTimer = null, added = 0;
-  const pending = new Map();        // written together, so the pages' content scripts hear one change, not hundreds
 
   // cyrb53: a fast 53-bit string hash with good avalanche (two 32-bit lanes)
   function cyrb53(str, seed = 0) {
@@ -303,8 +309,6 @@
   // is looked for as "fahrrad" and "velo", "Fahrradweg" also as "veloweg",
   // "parkt" also as "parkiert", "groß" as "gross" (ß and ss are one letter
   // here). Every pair is a German form and the Swiss one it replaces.
-  const fold = s => s.normalize('NFKC').toLowerCase().replace(/ß/g, 'ss').replace(/\u00ad/g, '');
-  let pairs = null;
   function swissPairs() {
     const D = globalThis.HD_DICT;
     if (!D) return [];
@@ -358,7 +362,6 @@
   // gives 32 hex digits) and text of a sensible size are taken, and a site
   // reads only what was kept on that site, so it cannot ask whether a PDF was
   // opened elsewhere.
-  const FIND_MAX_PAGES = 10000, FIND_MAX_CHARS = 8e6;
   async function findCache(fp, pages) {
     if (typeof fp !== 'string' || !/^[0-9a-f]{32}$/i.test(fp)) return null;
     if (pages && !(Array.isArray(pages) && pages.length <= FIND_MAX_PAGES && pages.every(t => typeof t === 'string')

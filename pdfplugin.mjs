@@ -145,6 +145,9 @@ const GAP = 4;
 // Text converted ahead of drawing (textAround): all of a document up to this
 // many pages, else this many pages behind and ahead of the ones on screen.
 const TEXT_ALL = 60, TEXT_BEHIND = 2, TEXT_AHEAD = 6;
+// how long after the last zoom step the pages are drawn at their new size (ms);
+// until then they are stretched, as a native viewer does mid-pinch
+const ZOOM_SETTLE = 180;
 const BG = 'rgb(40, 40, 40)';
 
 // Chrome starts no workers for a page from this computer (file://): there
@@ -346,6 +349,8 @@ class Plugin {
     this.place();
   }
 
+  zooming() { return this.zoomedAt && performance.now() - this.zoomedAt < ZOOM_SETTLE; }
+
   // where the document sits in the scroller: centred while narrower than it
   offsetX() { return Math.max(0, Math.floor((this.scroller.clientWidth - this.dims.width * this.zoom) / 2)); }
 
@@ -372,7 +377,7 @@ class Plugin {
       const w = (b.width - b.ins.left - b.ins.right) * z, h = (b.height - b.ins.top - b.ins.bottom) * z;
       Object.assign(p.el.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
       Object.assign(p.shadowEl.style, { left: `${ox + b.x * z}px`, top: `${b.y * z}px`, width: `${b.width * z}px`, height: `${b.height * z}px` });
-      shadowFor(p.shadowEl, z, b.width, b.height, b.ins);
+      if (!this.zooming() || !p.shadowEl.dataset.key) shadowFor(p.shadowEl, z, b.width, b.height, b.ins);
       const notesKey = `${z}:${this.rotation}:${this.notesVersion}`;
       if ((p.notes || this.notes.size) && p.notesKey !== notesKey) { p.notesKey = notesKey; this.renderNotes(i); }
       // the text layer's scale follows (pdf.js positions it in these units)
@@ -410,6 +415,7 @@ class Plugin {
       const cssW = parseFloat(p.el.style.width);
       const scale = cssW / this.pageSize(i)[0];
       if (p.scale === scale && p.canvas) continue;
+      if (p.canvas && this.zooming()) continue;           // stretched for now, drawn when the zoom settles
       this.draw(i, scale, dpr);
     }
   }
@@ -899,7 +905,14 @@ class Plugin {
       case 'updateSize': this.size = { width: m.width, height: m.height }; this.paintSoon(); break;
       case 'syncScrollToRemote': this.scrollTo(m.x, m.y, m.isSmooth, true); break;
       case 'viewport':
-        if (m.zoom && m.zoom !== this.zoom) { this.zoom = m.zoom; this.place(); }
+        if (m.zoom && m.zoom !== this.zoom) {
+          // while zooming, the pages drawn are stretched; they are drawn again
+          // at the new size once the zoom has settled
+          this.zoomedAt = performance.now();
+          clearTimeout(this.settle);
+          this.settle = setTimeout(() => { this.zoomedAt = 0; this.paintSoon(); }, ZOOM_SETTLE);
+          this.zoom = m.zoom; this.place();
+        }
         if (m.xOffset != null) this.scrollTo(m.xOffset, m.yOffset, false);
         this.paintSoon();
         break;
@@ -1040,12 +1053,22 @@ function shadowFor(el, z, boxW, boxH, ins) {
     // the page, in this box's pixels, shifted down
     const px0 = ins.left * k, px1 = W - ins.right * k - 1, py0 = (ins.top + 2) * k, py1 = H - ins.bottom * k - 1 + 2 * k;
     const inside = (x, y) => x >= ins.left * k && x <= W - ins.right * k - 1 && y >= ins.top * k && y <= H - ins.bottom * k - 1;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      if (inside(x, y)) continue;
+    // only the band around the page: a row across it skips straight over its
+    // inside (the pixels inside() is true for), which is all but a few pixels
+    // of the bitmap, at every zoom step
+    const in0 = Math.ceil(ins.left * k), in1 = Math.floor(W - ins.right * k - 1);
+    const shade = (x, y) => {
       const dx = Math.max(px0 - x, 0, x - px1), dy = Math.max(py0 - y, 0, y - py1);
       const t = dx || dy ? Math.hypot(dx, dy) / k : -Math.min(x - px0, px1 - x, y - py0, py1 - y) / k;
       const a = darken(t) / 40;
       img.data[(y * W + x) * 4 + 3] = Math.round(a * 255);
+    };
+    for (let y = 0; y < H; y++) {
+      const across = in0 <= in1 && inside(in0, y);
+      for (let x = 0; x < W; x++) {
+        if (across && x === in0) { x = in1; continue; }
+        if (!inside(x, y)) shade(x, y);
+      }
     }
     ctx.putImageData(img, 0, 0);
     url = canvas.convertToBlob().then(b => URL.createObjectURL(b));
