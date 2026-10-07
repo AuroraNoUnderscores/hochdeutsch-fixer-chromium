@@ -383,6 +383,11 @@ browser may cache scripts between edits, so reload hard):
 - PDFs built by a page (`blob:`) stay in Chrome's viewer, unconverted; so do
   PDFs a server sends as downloads (unless a site shows them in its own pdf.js
   viewer, above), and PDFs from disk while **Allow access to file URLs** is off.
+- A converted PDF page is kept in the extension's own storage (never the
+  site's), keyed by a hash of its text items, the flavour, the model switch and
+  the extension version, so a page seen before opens without the rules or the
+  model. A page drawn before the model had spoken is shown from there at once
+  and converted again behind it. The 4000 most recently used pages are kept.
 - In a PDF of more than 60 pages, text is converted for the pages around the
   one you read (2 back, 6 ahead), following as you scroll, so find reaches
   those; a shorter PDF is converted whole, nearest pages first, and find

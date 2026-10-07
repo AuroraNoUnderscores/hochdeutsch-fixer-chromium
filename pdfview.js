@@ -213,12 +213,89 @@
     });
   }
 
+  // ---------- a page converted once is kept ----------
+  // Converting a page costs the rules and, where they leave a choice, the
+  // model, and a lecture script is opened again and again. So a page's final
+  // answer is kept in the extension's own storage (never the site's), under a
+  // hash of exactly what it was made from: the page's text items with their
+  // positions and widths, the page box, the flavour, the model switch and the
+  // extension's version. Change any of these and it is another key. A page
+  // answered before the model had spoken is shown from the cache at once and
+  // converted again behind it.
+  const CACHE = 'pdfpage:', INDEX = 'pdfpage-index', KEEP = 4000;
+  let prefs = null, index = null, flushTimer = null;
+  const pending = new Map();        // written together, so the pages' content scripts hear one change, not hundreds
+
+  // cyrb53: a fast 53-bit string hash with good avalanche (two 32-bit lanes)
+  function cyrb53(str, seed = 0) {
+    let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  }
+
+  async function pageKey({ items, view }) {
+    prefs ||= await chrome.storage.local.get(['mode', 'llm']);
+    const what = JSON.stringify([chrome.runtime.getManifest().version, prefs.mode || 'hamburg', prefs.llm !== false, view, items]);
+    // two seeds and the length: 106 bits and more, no two pages share a key in practice
+    return CACHE + cyrb53(what).toString(36) + cyrb53(what, 0x9e3779b9).toString(36) + what.length.toString(36);
+  }
+
+  function keep(key, entry) {
+    pending.set(key, entry);
+    index[key] = Date.now();
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(flush, 1000);
+  }
+
+  // Pages written, and the oldest let go past KEEP. The index is merged with
+  // what other tabs wrote meanwhile, so none of their pages is lost track of.
+  async function flush() {
+    const stored = (await chrome.storage.local.get(INDEX))[INDEX] || {};
+    for (const [k, t] of Object.entries(stored)) if (!(index[k] >= t)) index[k] = t;
+    const keys = Object.keys(index);
+    const out = keys.length > KEEP ? keys.sort((a, b) => index[a] - index[b]).slice(0, keys.length - KEEP) : [];
+    for (const k of out) { delete index[k]; pending.delete(k); }
+    const write = Object.fromEntries(pending);
+    pending.clear();
+    await chrome.storage.local.set({ ...write, [INDEX]: index });
+    if (out.length) await chrome.storage.local.remove(out);
+  }
+
+  async function cachedPage(payload, reply, redraw) {
+    const key = await pageKey(payload);
+    index ||= (await chrome.storage.local.get(INDEX))[INDEX] || {};
+    const hit = pending.get(key) || (await chrome.storage.local.get(key))[key];
+    if (hit) {
+      index[key] = Date.now();
+      reply({ edits: hit.edits, version: hit.version });
+      if (hit.changes) HD_PDFTEXT.remember(payload.page, hit.changes);
+      if (hit.final) return;
+    }
+    // converted now: a final answer is kept as it is; one given before the
+    // model had spoken is kept too, marked to be converted again next time
+    let shown = hit?.version ?? -1;
+    const store = d => keep(key, d.changes ? { edits: d.edits, version: d.version, changes: d.changes, final: true }
+                                           : { edits: d.edits, version: d.version, final: false });
+    const answer = d => {
+      if (!hit || d.changes) store(d);
+      if (shown < 0) { shown = d.version; reply(d); }
+      else if (d.version > shown || d.changes) { shown = Math.max(shown, d.version); redraw({ page: payload.page, edits: d.edits, version: Math.max(d.version, hit ? hit.version + 1 : 0) }); }
+    };
+    await HD_PDFTEXT.convertPage(payload, answer, d => { store(d); redraw(d); });
+  }
+
   function serveText() {
     document.addEventListener('hdfx-pdf-req', e => {
       const { id, type, payload } = JSON.parse(e.detail);
       const reply = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-res', { detail: JSON.stringify({ id, data }) }));
       const redraw = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-redraw', { detail: JSON.stringify(data) }));
-      if (type === 'page') HD_PDFTEXT.convertPage(payload, reply, redraw).catch(err => { console.error('[Hochdeutsch-Fixer]', err); reply({ edits: [], version: 0 }); });
+      if (type === 'page') cachedPage(payload, reply, redraw).catch(err => { console.error('[Hochdeutsch-Fixer]', err); reply({ edits: [], version: 0 }); });
     });
     browser.runtime.onMessage.addListener(msg => {
       if (msg === 'hd-status' && window.top === window)
