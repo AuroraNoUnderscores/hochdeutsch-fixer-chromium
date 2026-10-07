@@ -6,6 +6,7 @@
 //   with pages laid out as the plugin lays them out, drawn by pdf.js with the
 //   converted text (pdfhooks.mjs).
 import { onRedraw } from './pdfhooks.mjs';
+import { Find } from './pdffind.mjs';
 import './pdfjs/build/pdf.mjs';
 
 const lib = globalThis.pdfjsLib;
@@ -254,6 +255,8 @@ class Plugin {
       const page = await this.doc.getPage(i + 1);
       this.pages.push({ page, el: null, canvas: null, scale: 0, text: null, links: false });
     }
+    // a long document has its own find (pdffind.mjs): the browser's sees only converted pages
+    if (n > TEXT_ALL) this.find ||= new Find(this);
     this.layout();
     this.post({ type: 'documentDimensions', ...this.dims });
     this.post({ type: 'rendererPreferencesUpdated', caretBrowsingEnabled: false });
