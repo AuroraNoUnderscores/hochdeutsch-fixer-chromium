@@ -36,7 +36,8 @@
 
   // The PDF a pdf.js viewer page is asked to show, as pdf.js reads it: the
   // file parameter of its address. Only a file on the page's own origin, the
-  // one a hosted pdf.js viewer accepts. A page given back (below) is let be.
+  // one a hosted pdf.js viewer accepts. A page just given back (below) is let
+  // be, this once: the next visit tries again, as the switches may have changed.
   function hostedFile() {
     if (!/^https?:$/.test(location.protocol)) return null;
     const file = new URLSearchParams(location.search).get('file');
@@ -44,7 +45,12 @@
     let url;
     try { url = new URL(file, location.href); } catch { return null; }
     if (url.origin !== location.origin) return null;
-    try { if (sessionStorage.getItem('hdfx-pdf-returned') === location.href) return null; } catch {}
+    try {
+      if (sessionStorage.getItem('hdfx-pdf-returned') === location.href) {
+        sessionStorage.removeItem('hdfx-pdf-returned');
+        return null;
+      }
+    } catch {}
     return url.href;
   }
 
@@ -59,6 +65,8 @@
     watch.observe(document, { childList: true, subtree: true });
     document.addEventListener('DOMContentLoaded', () => watch.disconnect(), { once: true });
 
+    // The background's answer is mostly in by now (one storage read); where it
+    // is not, the page is stopped first and given back if the answer is no.
     async function seen() {
       watch.disconnect();
       if (answer === null) return;            // off here: pdf.js shows it as it is

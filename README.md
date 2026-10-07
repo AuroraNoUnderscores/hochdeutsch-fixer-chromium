@@ -237,7 +237,10 @@ it before pdf.js starts, and puts this viewer there with the same PDF: only a
 file on the viewer's own origin, as pdf.js itself allows a hosted viewer. The
 site's CSP still holds, and may allow no worker (polybox allows none), so pdf.js
 reads the PDF on the page, as for `file://`. A file that turns out not to be a
-PDF is given back to the site's viewer.
+PDF is given back to the site's viewer, for that visit. Unlike a PDF Chrome
+opens, this one is recognised by the page itself, so a page that copies pdf.js's
+markup gets this viewer for a PDF of its own origin; it gains nothing by that
+which `content.js` does not already do on any page.
 
 Drawing (pen, highlighter, eraser, undo) and text boxes are kept by the plugin
 and saved as Ink and FreeText annotations when you download "with your changes";
