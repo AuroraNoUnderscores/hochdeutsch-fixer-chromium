@@ -5,7 +5,7 @@
 // - the plugin: the same messages the PDF plugin exchanges with the viewer,
 //   with pages laid out as the plugin lays them out, drawn by pdf.js with the
 //   converted text (pdfhooks.mjs).
-import { onRedraw } from './pdfhooks.mjs';
+import { onRedraw, highlightLayer } from './pdfhooks.mjs';
 import { Find } from './pdffind.mjs';
 import './pdfjs/build/pdf.mjs';
 
@@ -456,6 +456,7 @@ class Plugin {
     const layer = new lib.TextLayer({ textContentSource: p.page.streamTextContent({ includeMarkedContent: true, disableNormalization: true }), container: div, viewport });
     await layer.render().catch(() => {});
     p.el.append(div);
+    highlightLayer(div, i);
   }
 
   // Pages' text ahead of drawing, so the find bar finds words on pages not
