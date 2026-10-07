@@ -19,5 +19,5 @@ cp -r "$src/pdfjs/build" pdfjs/build
 for d in cmaps standard_fonts iccs wasm; do cp -r "$src/pdfjs/web/$d" "pdfjs/web/$d"; done
 cp "$src/pdfjs/VERSION" pdfjs/VERSION
 py tools/layers_css.py "$src/pdfjs/web/viewer.windows.css" pdfjs/layers.css
-mkdir -p dev/pdf && cp "$src"/dev/pdf/*.pdf "$src"/dev/pdf/*.html "$src"/dev/pdf/make.py dev/pdf/
+mkdir -p dev/pdf && cp "$src"/dev/pdf/*.pdf "$src"/dev/pdf/*.html "$src"/dev/pdf/*.mjs "$src"/dev/pdf/make.py dev/pdf/
 echo "synced pdf.js and the test PDFs"
