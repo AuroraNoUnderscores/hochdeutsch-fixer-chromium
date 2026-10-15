@@ -3,7 +3,7 @@
 # be byte-identical, and both manifests must carry the same version.
 set -uo pipefail
 src="${1:-../hochdeutsch-fixer}"
-files="dictionary.js morph.js coverage.js german_too.js engine.js llm.js content.js popup.js test.js test.html pdftext.js pdfhooks.mjs"
+files="dictionary.js morph.js coverage.js german_too.js lang_data.js lang.js engine.js llm.js content.js popup.js test.js test.html pdftext.js pdfhooks.mjs"
 bad=0
 for f in $files "$src"/dev/pdf/*.mjs; do
   f="${f#"$src"/}"

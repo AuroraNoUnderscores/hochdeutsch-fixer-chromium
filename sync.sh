@@ -3,7 +3,7 @@
 # byte-identical on both sides; the rest of this folder is the Chromium shell.
 set -euo pipefail
 src="${1:-../hochdeutsch-fixer}"
-files="dictionary.js morph.js coverage.js german_too.js engine.js llm.js content.js popup.js test.js test.html pdftext.js pdfhooks.mjs"
+files="dictionary.js morph.js coverage.js german_too.js lang_data.js lang.js engine.js llm.js content.js popup.js test.js test.html pdftext.js pdfhooks.mjs"
 for f in $files; do
   cp "$src/$f" "./$f"
   echo "synced $f"
