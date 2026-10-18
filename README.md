@@ -109,7 +109,8 @@ words instead: an English paragraph in a German page is English sentence by
 sentence, also where it breaks at "Ed. K. Gross etc.". Inside a German
 sentence, two or more words in a row that read as one other language
 ("long-ass", "Catholic Mass", "Home Office") are left alone; a single word is
-not, so "das Mass" still becomes "das Maß". A Swiss word or ss right before
+not, so "das Mass" still becomes "das Maß". An English word on a German ss stem
+keeps its ss ("grossly", "grossed", "fussy"). A Swiss word or ss right before
 such a run goes with it ("Mass Effect", "Gross margin", "Store locator"); one
 after it does not ("eine faire Offerte"), nor one joined to it by a hyphen
 ("Töff-Crack"). A compound
@@ -294,7 +295,8 @@ where Chrome lacks it, on the page and in pdf.js's worker, before pdf.js loads.
 
 LaTeX PDFs whose "ü" is a "¨" set over a "u" (the old font encoding) read and
 convert as in the Firefox build: see *Formulas, list labels and missing
-letters* there.
+letters* there, and so does small print (footnotes, tables, letter-spaced
+fine print).
 
 **PDFs on this computer** (`file://`) are converted too, once the extension's
 **Allow access to file URLs** switch is on (`chrome://extensions` → Details);
@@ -441,6 +443,9 @@ browser may cache scripts between edits, so reload hard):
 
 ## Known limits
 
+- In a PDF, a word that grows right before a footnote mark is squeezed (the
+  mark stays where it is drawn), and a word in a tiny superscript that pdf.js
+  itself reads apart ("V elo") is not found.
 - Frames: the extension runs in iframes too, including the `srcdoc` and `blob`
   documents that artifacts and embedded readers use — those need an explicit
   opt-in (`match_about_blank`, and `match_origin_as_fallback` on Chromium),
