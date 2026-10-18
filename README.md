@@ -443,9 +443,10 @@ browser may cache scripts between edits, so reload hard):
 
 ## Known limits
 
-- In a PDF, a word that grows right before a footnote mark is squeezed (the
-  mark stays where it is drawn), and a word in a tiny superscript that pdf.js
-  itself reads apart ("V elo") is not found.
+- In a PDF, a word in a tiny superscript that pdf.js itself reads apart ("V
+  elo") is not found, and where a longer word moves the unchanged words after
+  it on, their invisible text-layer boxes (selecting, the find highlight) stay
+  where the PDF had them, up to a word's width off.
 - Frames: the extension runs in iframes too, including the `srcdoc` and `blob`
   documents that artifacts and embedded readers use — those need an explicit
   opt-in (`match_about_blank`, and `match_origin_as_fallback` on Chromium),
