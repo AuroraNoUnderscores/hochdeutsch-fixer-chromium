@@ -5,6 +5,7 @@
 // - the plugin: the same messages the PDF plugin exchanges with the viewer,
 //   with pages laid out as the plugin lays them out, drawn by pdf.js with the
 //   converted text (pdfhooks.mjs).
+import './pdfcompat.mjs';
 import { onRedraw, highlightLayer } from './pdfhooks.mjs';
 import { Find } from './pdffind.mjs';
 import './pdfjs/build/pdf.mjs';
@@ -158,7 +159,7 @@ const BG = 'rgb(40, 40, 40)';
 let workerReady = Promise.resolve();
 if (location.protocol === 'file:' || cfg.hosted) workerReady = import(BASE + 'pdfjs/build/pdf.worker.mjs');
 else {
-  const worker = new Worker(URL.createObjectURL(new Blob([`import ${JSON.stringify(BASE + 'pdfjs/build/pdf.worker.mjs')};`], { type: 'text/javascript' })), { type: 'module' });
+  const worker = new Worker(URL.createObjectURL(new Blob([`import ${JSON.stringify(BASE + 'pdfcompat.mjs')}; import ${JSON.stringify(BASE + 'pdfjs/build/pdf.worker.mjs')};`], { type: 'text/javascript' })), { type: 'module' });
   lib.GlobalWorkerOptions.workerPort = worker;
 }
 

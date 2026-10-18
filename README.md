@@ -104,9 +104,15 @@ It decides at three levels. A block is converted when it reads as German. In
 it, a sentence that reads as another language is left alone; a sentence is
 read in the light of its block (a short one goes with its paragraph, up to
 odds of 1000 to 1), and must be clearly foreign (10 to 1), so "Das Hospital"
-stays German. Inside a German sentence, two or more words in a row that read
-as one other language ("long-ass", "Catholic Mass", "Home Office") are left
-alone; a single word is not, so "das Mass" still becomes "das Maß". A compound
+stays German. A text of six words or more is read in the light of its own
+words instead: an English paragraph in a German page is English sentence by
+sentence, also where it breaks at "Ed. K. Gross etc.". Inside a German
+sentence, two or more words in a row that read as one other language
+("long-ass", "Catholic Mass", "Home Office") are left alone; a single word is
+not, so "das Mass" still becomes "das Maß". A Swiss word or ss right before
+such a run goes with it ("Mass Effect", "Gross margin", "Store locator"); one
+after it does not ("eine faire Offerte"), nor one joined to it by a hyphen
+("Töff-Crack"). A compound
 built on a Swiss word changes only where the rest is made of German words
 ("Velo|weg|netz"), not "Offert|ory" or "Offert|orium".
 
@@ -142,6 +148,8 @@ Estrich the attic from Estrich the screed, a Pult as desk from one as mixing
 desk, or Peperoni the bell pepper from Peperoni the chili. For those words topic
 cues decide (`cues` in `dictionary.js`: "Risse", "Beton" → screed; "Keller",
 "Stauraum" → attic), which took them from 44 to 49 of 61 right on .ch sentences.
+Where both kinds are there, the one nearer the word decides: "Im Keller wurde
+ein neuer Estrich gegossen" is screed.
 A floor being laid ("Zementestrich", "8 cm", "im Wohnzimmer") is screed, and
 "Lavabo" after the Gabenbereitung is the priest's hand-washing, not a washbasin.
 "Store" is a shop on .ch pages 6 times in 7 (App Store, Music Store), so it only
@@ -155,8 +163,12 @@ A word German also uses means the Swiss thing only where the text is Swiss:
 "Peperoni" are ordinary southern German. So a text has to show it is Swiss
 before such a word changes: a Swiss word German does not use ("Velo",
 "parkieren", "Trottoir"), a Swiss ss where German writes ß ("Strasse",
-"gross"), a price in francs, anywhere on the page (or PDF), or in the block
-around the word. "Der Estrich im Neubau muss trocknen." keeps its Estrich;
+"gross"), a price in francs, on the page (or PDF), or in the block around the
+word. Two different signs make a text Swiss, or one in a short text (40 words
+at most, a block): a German page with "Hauptstrasse" in its footer or prices in
+francs for its Swiss customers is not Swiss for that alone. On German screed
+sentences next to one such sign, 8 of 18 became an attic before, none now.
+"Der Estrich im Neubau muss trocknen." keeps its Estrich;
 "Die alten Velos stehen im Estrich." gets a Dachboden. Which form is used
 counts, not just the word: "Store" is German too, the plural "Storen" only
 Swiss. A topic cue (above) still decides first; then the Swiss evidence; then,
@@ -273,6 +285,16 @@ How, since no extension can reach Chrome's viewer:
    viewer's messages as PDFium does, lays pages out as PDFium does (sizes,
    gaps, shadows, two-page rows) and draws them with the converted text, which
    `pdftext.js` and `pdfhooks.mjs` provide exactly as in the Firefox build.
+
+pdf.js comes from the newest Firefox and uses what that Firefox has, some of
+which Chrome gained only lately or not yet (`Map.getOrInsertComputed`,
+`Math.sumPrecise`, `Uint8Array.toHex`, `Float16Array`): without them a Chrome
+from before them showed no PDF at all, only errors. `pdfcompat.mjs` adds each
+where Chrome lacks it, on the page and in pdf.js's worker, before pdf.js loads.
+
+LaTeX PDFs whose "ü" is a "¨" set over a "u" (the old font encoding) read and
+convert as in the Firefox build: see *Formulas, list labels and missing
+letters* there.
 
 **PDFs on this computer** (`file://`) are converted too, once the extension's
 **Allow access to file URLs** switch is on (`chrome://extensions` → Details);
