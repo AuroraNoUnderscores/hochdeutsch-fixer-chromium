@@ -192,7 +192,7 @@ def run(base, tmp):
             check(f'LaTeX: text layer reads "{word}"', word in text)
         check('LaTeX: no accents on their own left', '¨' not in text)
         # small print: letter-spaced (pdf.js reads "V e l o"), footnotes, tiny text, a table, a margin note
-        for f in ['spaced.pdf', 'smallprint.pdf']:
+        for f in ['spaced.pdf', 'smallprint.pdf', 'words.pdf']:
             b.open(base + f); time.sleep(3)
             text = b.js(TEXT).replace(' ', '')
             check(f'{f}: no Velo, Spital, Offerte left', not any(w in text for w in ['Velo', 'Spital', 'Offerte', 'Trottoir']), text[:200])
