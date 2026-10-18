@@ -185,6 +185,12 @@ def run(base, tmp):
         check('no Swiss words left in the text layer', not any(w in text for w in ['Neulenker', 'Trottoir', 'Offerte', 'Velo ']))
         errs = b.errors()
         check('no errors in the viewer', not errs, str(errs[:3]))
+        # LaTeX's old encoding draws "ü" as "¨" over "u": read as written, converted, nothing in the way
+        b.open(base + 'latex.pdf'); time.sleep(3)
+        text = b.js(TEXT)
+        for word in ['Die für die', 'Flüssigkeit', 'Dewargefäß', 'verschließbaren', 'Größe der Zelle', 'Fahrrad steht auf dem']:
+            check(f'LaTeX: text layer reads "{word}"', word in text)
+        check('LaTeX: no accents on their own left', '¨' not in text)
 
         # 3. Find: every page's text is there for Ctrl+F, converted.
         b.open(base + 'long.pdf'); time.sleep(4)
