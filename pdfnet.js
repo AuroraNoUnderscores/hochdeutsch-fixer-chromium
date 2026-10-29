@@ -83,6 +83,25 @@ export async function pdfLoad(sender, local, ensureOffscreen, hosted) {
   return { url: load.url, length: load.length, tabId: tab ?? -1, tabUrl: sender.tab?.url || load.url, embedded: frame !== 0 };
 }
 
+// A PDF with no text (a scan) is left to Chrome's own viewer from then on: it
+// reads those with OCR, which this one cannot. pdfhooks.mjs finds them; the PDF's
+// address gets an allow rule that outranks the one above, and the page is opened
+// again. The addresses are kept (storage), the rules are rebuilt from them.
+const NATIVE = 5000, NATIVE_MAX = 100;
+export async function pdfNative(sender) {
+  const load = await pdfLoad(sender, false, () => {}, null);
+  if (!load || /[*^|]/.test(load.url)) return false;
+  const { nativePdfs = [] } = await chrome.storage.local.get('nativePdfs');
+  const list = [...nativePdfs.filter(u => u !== load.url), load.url].slice(-NATIVE_MAX);
+  await chrome.storage.local.set({ nativePdfs: list });
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: Array.from({ length: NATIVE_MAX }, (_, i) => NATIVE + i),
+    addRules: list.map((url, i) => ({ id: NATIVE + i, priority: 2,
+      condition: { urlFilter: `|${url}|`, resourceTypes: ['main_frame', 'sub_frame', 'object'] }, action: { type: 'allow' } })),
+  });
+  return true;
+}
+
 // A site's own pdf.js viewer (Nextcloud and polybox, ownCloud, and others that
 // ship pdf.js's viewer.html): pdf.js draws the pages itself, so the text could
 // only be changed in the invisible layer above them, out of step with what is

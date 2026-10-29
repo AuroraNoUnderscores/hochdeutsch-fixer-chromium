@@ -387,6 +387,8 @@
       const { id, type, payload } = JSON.parse(e.detail);
       const reply = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-res', { detail: JSON.stringify({ id, data }) }));
       const redraw = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-redraw', { detail: JSON.stringify(data) }));
+      // a scan: Chrome's own viewer reads it (OCR), this one cannot
+      if (type === 'image-only') return void chrome.runtime.sendMessage({ type: 'pdf-native' }).then(ok => ok && location.reload(), () => {});
       if (type === 'swiss-forms') return reply(swissForms(payload.query || ''));
       if (type === 'find-cache-get') return findCache(payload.fp).then(reply, () => reply(null));
       if (type === 'find-cache-set') return findCache(payload.fp, payload.pages).then(() => reply(true), () => reply(false));
