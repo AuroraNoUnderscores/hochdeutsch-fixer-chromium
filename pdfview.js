@@ -396,7 +396,12 @@
     });
     browser.runtime.onMessage.addListener(msg => {
       if (msg === 'hd-status' && window.top === window)
-        return Promise.resolve({ host: location.hostname, ...HD_PDFTEXT.status(), active: true, meta: false, pending: 0 });
+        return Promise.resolve({ host: location.hostname, ...HD_PDFTEXT.status(), active: true, meta: false, pending: 0, native: true });
+      // the popup's "Open this PDF in Chrome's viewer"
+      if (msg === 'hd-native' && window.top === window) {
+        chrome.runtime.sendMessage({ type: 'pdf-native' }).then(ok => ok && location.reload(), () => {});
+        return Promise.resolve(true);
+      }
     });
     chrome.storage.onChanged.addListener((ch, area) => {
       if (area === 'local' && ['enabled', 'disabledSites', 'mode', 'llm', 'pdf', 'rejects'].some(k => k in ch)) location.reload();

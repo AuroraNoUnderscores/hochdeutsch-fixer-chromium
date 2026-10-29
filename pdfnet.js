@@ -102,6 +102,11 @@ export async function pdfNative(sender) {
   return true;
 }
 
+export async function pdfNativeReset() {
+  await chrome.storage.local.remove('nativePdfs');
+  await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: Array.from({ length: NATIVE_MAX }, (_, i) => NATIVE + i) });
+}
+
 // A site's own pdf.js viewer (Nextcloud and polybox, ownCloud, and others that
 // ship pdf.js's viewer.html): pdf.js draws the pages itself, so the text could
 // only be changed in the invisible layer above them, out of step with what is
