@@ -227,8 +227,8 @@
   // model, and a lecture script is opened again and again. So a page's final
   // answer is kept in the extension's own storage (never the site's), under a
   // hash of exactly what it was made from: the page's text items with their
-  // positions and widths, the page box, the flavour, the model switch and the
-  // extension's version. Change any of these and it is another key. A page
+  // positions and widths, the page box, the flavour, the model switch, the places put
+  // back as wrong, and the extension's version. Change any of these and it is another key. A page
   // answered before the model had spoken is shown from the cache at once and
   // converted again behind it.
   // Any script on the page can send the viewer's requests, so what one page
@@ -250,8 +250,9 @@
   }
 
   async function pageKey({ items, view }) {
-    prefs ||= await chrome.storage.local.get(['mode', 'llm']);
-    const what = JSON.stringify([chrome.runtime.getManifest().version, location.origin, prefs.mode || 'hamburg', prefs.llm !== false, view, items]);
+    prefs ||= await chrome.storage.local.get(['mode', 'llm', 'rejects']);
+    // the places the reader put back are part of it (a change reported as wrong must not come back from here)
+    const what = JSON.stringify([chrome.runtime.getManifest().version, location.origin, prefs.mode || 'hamburg', prefs.llm !== false, prefs.rejects || [], view, items]);
     // two seeds and the length: 106 bits and more, no two pages share a key in practice
     return CACHE + cyrb53(what).toString(36) + cyrb53(what, 0x9e3779b9).toString(36) + what.length.toString(36);
   }
