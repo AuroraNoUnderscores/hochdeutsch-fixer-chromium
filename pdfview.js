@@ -396,7 +396,7 @@
         return Promise.resolve({ host: location.hostname, ...HD_PDFTEXT.status(), active: true, meta: false, pending: 0 });
     });
     chrome.storage.onChanged.addListener((ch, area) => {
-      if (area === 'local' && ['enabled', 'disabledSites', 'mode', 'llm', 'pdf'].some(k => k in ch)) location.reload();
+      if (area === 'local' && ['enabled', 'disabledSites', 'mode', 'llm', 'pdf', 'rejects'].some(k => k in ch)) location.reload();
     });
   }
 })();
