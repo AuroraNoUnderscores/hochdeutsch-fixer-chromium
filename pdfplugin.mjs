@@ -112,6 +112,18 @@ if (!cfg.embedded) {
     setTabZoom(step(e.deltaY < 0 ? 1 : -1));
   }, { passive: false, capture: true });
 }
+// The viewer's files come from a Chrome built for Windows and Linux, whose
+// shortcuts take Ctrl. On a Mac, Command+A selects all the text, as in Chrome's
+// own viewer there, and not where that viewer leaves the key alone (a text
+// field, presenting).
+if (/Mac/.test(navigator.platform)) addEventListener('keydown', e => {
+  if (e.key !== 'a' || !e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.defaultPrevented || document.fullscreenElement) return;
+  let a = document.activeElement;
+  while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+  if (a && (a.isContentEditable || (a.tagName === 'INPUT' && a.type !== 'radio') || a.tagName === 'TEXTAREA')) return;
+  e.preventDefault();
+  plugin?.selectAll();
+});
 
 // "Save" asks where, as Chrome's viewer does (a save dialog where the page may
 // open one, else the browser's download).
@@ -178,12 +190,15 @@ class Plugin {
       .shadow canvas { width: 100%; height: 100%; display: block; }
       .page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
       .page .textLayer ::selection { background: rgba(70, 120, 255, 0.4); color: transparent; }
-      .links a { position: absolute; display: block; }
+      /* the link layer covers the page above the text layer: only its links
+         take the mouse, or no text could be selected anywhere on the page */
+      .links { pointer-events: none; }
+      .links a { position: absolute; display: block; pointer-events: auto; }
       .page canvas.ink { z-index: 4; pointer-events: none; touch-action: none; }
       :host(.drawing) .page canvas.ink { pointer-events: auto; cursor: crosshair; }
       :host(.texting) #scroller { cursor: text; }
       :host(.presenting) #scroller { scrollbar-width: none; }
-      :host(.texting) .page .links { pointer-events: none; }
+      :host(.texting) .page .links a { pointer-events: none; }
       .annotationLayer { z-index: 3; --annotation-unfocused-field-background: none; --annotation-unfocused-field-filter: none; --input-focus-border-color: transparent;
                          --input-hover-border-color: transparent; --input-unfocused-border-color: transparent; --input-focus-outline: none; }
       .annotationLayer :is(input, textarea, select) { background: rgb(0 51 255 / 0.05) !important; border: none !important; outline: none !important; box-shadow: none !important; }
@@ -215,6 +230,17 @@ class Plugin {
       const r = this.el.getBoundingClientRect();
       this.post({ type: 'sendClickEvent', x: e.clientX - r.left, y: e.clientY - r.top });
     }, true);
+    // Copying copies the plain text, as Chrome's own viewer does: the text
+    // layer's markup is invisible, absolutely placed text, which pasted as it
+    // is into a mail or a document would not be seen.
+    this.scroller.addEventListener('copy', e => {
+      if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;     // a form field's own text
+      const text = this.selectedText();
+      if (!text) return;
+      e.clipboardData.setData('text/plain', lib.normalizeUnicode(text).replaceAll('\0', ''));
+      e.preventDefault();
+    });
+    this.scroller.addEventListener('pointerdown', e => this.gapDrag(e));
     this.size = { width: 0, height: 0 };
     this.data = null;
     this.ready = null;
@@ -887,7 +913,7 @@ class Plugin {
   }
 
   selectAll() {
-    const layers = this.pages.map(p => p.text).filter(Boolean);
+    const layers = this.pages.map(p => p.text).filter(d => d?.isConnected);     // not one still being made
     if (!layers.length) return;
     const sel = getSelection();
     const r = document.createRange();
@@ -898,6 +924,102 @@ class Plugin {
   selectedText() {
     const sel = this.shadow.getSelection?.() || getSelection();
     return sel ? sel.toString() : '';
+  }
+
+  // A drag that starts on a page but not on a word (in the margin, between
+  // lines, past a line's end) selects from the letter nearest to where it
+  // started to the one nearest the pointer, as in Chrome's own viewer: Chrome
+  // starts no selection there, as the viewer's style leaves only the words
+  // selectable (user-select: none on #content). A click there without a drag
+  // lets go of the selection, or with Shift takes it to that letter.
+  gapDrag(e) {
+    const t = e.target;
+    if (e.button !== 0 || this.mode !== 'off' || e.pointerType === 'touch' || !t.closest?.('.textLayer')
+        || getComputedStyle(t).userSelect !== 'none') return;
+    const sel = getSelection(), mine = this.shadow.getSelection?.() || sel;
+    const x0 = e.clientX, y0 = e.clientY;
+    let anchor = e.shiftKey && mine.rangeCount && this.shadow.contains(mine.anchorNode) ? { node: mine.anchorNode, offset: mine.anchorOffset } : null;
+    let last = { x: x0, y: y0 }, moved = false, raf = 0;
+    const extend = () => {
+      anchor ||= this.textAt(x0, y0);
+      const focus = this.textAt(last.x, last.y);
+      if (anchor && focus) sel.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+    };
+    // past the top or bottom of the document's window, it scrolls on
+    const scroll = () => {
+      raf = 0;
+      const r = this.scroller.getBoundingClientRect();
+      const dy = last.y < r.top ? last.y - r.top : last.y > r.bottom ? last.y - r.bottom : 0;
+      if (!dy) return;
+      this.scroller.scrollTop += Math.sign(dy) * Math.min(Math.abs(dy), 40);
+      extend();
+      raf = requestAnimationFrame(scroll);
+    };
+    const move = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      last = { x: ev.clientX, y: ev.clientY };
+      if (!moved && Math.hypot(last.x - x0, last.y - y0) < 3) return;
+      moved = true;
+      extend();
+      if (!raf) raf = requestAnimationFrame(scroll);
+    };
+    const up = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      done();
+      if (moved || ev.type !== 'pointerup') return;
+      if (anchor) extend();
+      else if (mine.rangeCount && this.shadow.contains(mine.anchorNode)) sel.removeAllRanges();
+    };
+    const done = () => {
+      cancelAnimationFrame(raf);
+      removeEventListener('pointermove', move, true);
+      removeEventListener('pointerup', up, true);
+      removeEventListener('pointercancel', up, true);
+      removeEventListener('blur', done);
+    };
+    addEventListener('pointermove', move, true);
+    addEventListener('pointerup', up, true);
+    addEventListener('pointercancel', up, true);
+    addEventListener('blur', done);
+  }
+
+  // The place in the text nearest to a point (in the window): on the page
+  // nearest to it, in the nearest line, between the two letters it falls
+  // between, along the line's own direction (turned or right-to-left text too).
+  textAt(x, y) {
+    const away = r => Math.max(r.top - y, 0, y - r.bottom) * 1e4 + Math.max(r.left - x, 0, x - r.right);
+    let layer = null, best = Infinity;
+    for (const p of this.pages) {
+      if (!p.text?.isConnected) continue;
+      const d = away(p.el.getBoundingClientRect());
+      if (d < best) { best = d; layer = p.text; }
+    }
+    let node = null, box = null;
+    best = Infinity;
+    for (const s of layer?.querySelectorAll('span:not(.markedContent)') || []) {
+      const n = s.firstChild;
+      if (n?.nodeType !== Node.TEXT_NODE || !n.data.length) continue;
+      const r = s.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      const d = away(r);
+      if (d < best && getComputedStyle(s).userSelect !== 'none') { best = d; node = n; box = r; }
+    }
+    if (!node) return null;
+    // the point, moved onto that line; the letters' middles along it
+    const px = Math.min(Math.max(x, box.left), box.right), py = Math.min(Math.max(y, box.top), box.bottom);
+    const range = document.createRange(), mid = [];
+    for (let i = 0; i < node.data.length; i++) {
+      range.setStart(node, i); range.setEnd(node, i + 1);
+      const c = range.getBoundingClientRect();
+      mid.push([(c.left + c.right) / 2, (c.top + c.bottom) / 2]);
+    }
+    const [ax, ay] = mid[0], [bx, by] = mid[mid.length - 1];
+    const [dx, dy] = mid.length > 1 && (bx !== ax || by !== ay) ? [bx - ax, by - ay] : [1, 0];
+    const along = ([u, v]) => (u - ax) * dx + (v - ay) * dy;
+    const at = along([px, py]);
+    let offset = mid.findIndex(m => at < along(m));
+    if (offset < 0) offset = node.data.length;
+    return { node, offset };
   }
 
   // ---- the viewer's messages ----
