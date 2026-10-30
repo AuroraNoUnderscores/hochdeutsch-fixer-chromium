@@ -383,12 +383,15 @@
 
   function serveText() {
     HD_PDFTEXT.highlights();
+    // a file on this computer or a site's own pdf.js viewer has no address of its own to leave to Chrome's viewer
+    const native = !local && !hosted;
     document.addEventListener('hdfx-pdf-req', e => {
       const { id, type, payload } = JSON.parse(e.detail);
       const reply = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-res', { detail: JSON.stringify({ id, data }) }));
       const redraw = data => document.dispatchEvent(new CustomEvent('hdfx-pdf-redraw', { detail: JSON.stringify(data) }));
-      // a scan: Chrome's own viewer reads it (OCR), this one cannot
-      if (type === 'image-only') return void chrome.runtime.sendMessage({ type: 'pdf-native' }).then(ok => ok && location.reload(), () => {});
+      // a scan: Chrome's own viewer reads it (OCR), this one cannot. Only a PDF
+      // from the network can be left to it (an allow rule for its address)
+      if (type === 'image-only') return void (native && chrome.runtime.sendMessage({ type: 'pdf-native' }).then(ok => ok && location.reload(), () => {}));
       if (type === 'swiss-forms') return reply(swissForms(payload.query || ''));
       if (type === 'find-cache-get') return findCache(payload.fp).then(reply, () => reply(null));
       if (type === 'find-cache-set') return findCache(payload.fp, payload.pages).then(() => reply(true), () => reply(false));
@@ -396,9 +399,9 @@
     });
     browser.runtime.onMessage.addListener(msg => {
       if (msg === 'hd-status' && window.top === window)
-        return Promise.resolve({ host: location.hostname, ...HD_PDFTEXT.status(), active: true, meta: false, pending: 0, native: true });
+        return Promise.resolve({ host: location.hostname, ...HD_PDFTEXT.status(), active: true, meta: false, pending: 0, native });
       // the popup's "Open this PDF in Chrome's viewer"
-      if (msg === 'hd-native' && window.top === window) {
+      if (msg === 'hd-native' && native && window.top === window) {
         chrome.runtime.sendMessage({ type: 'pdf-native' }).then(ok => ok && location.reload(), () => {});
         return Promise.resolve(true);
       }
