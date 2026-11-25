@@ -5,7 +5,7 @@ set -uo pipefail
 src="${1:-../hochdeutsch-fixer}"
 files="dictionary.js morph.js coverage.js german_too.js lang_data.js lang.js engine.js llm.js content.js popup.js test.js test.html pdftext.js pdfhooks.mjs"
 bad=0
-for f in $files "$src"/dev/pdf/*.mjs; do
+for f in $files "$src"/dev/pdf/*.mjs "$src"/fonts/*; do
   f="${f#"$src"/}"
   cmp -s "$src/$f" "./$f" || { echo "differs: $f"; bad=1; }
 done

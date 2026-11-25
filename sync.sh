@@ -12,6 +12,8 @@ cp "$src"/dev/*.html "$src"/dev/*.js dev/
 echo "synced dev fixtures"
 rm -rf models && cp -r "$src/models" models
 echo "synced models"
+rm -rf fonts && cp -r "$src/fonts" fonts
+echo "synced fonts"
 # pdf.js itself (with the text hooks, see tools/sync_pdfjs.py there), not the
 # Firefox viewer around it: here Chrome's viewer is used (tools/sync_chrome_pdf.py)
 rm -rf pdfjs && mkdir -p pdfjs/web
