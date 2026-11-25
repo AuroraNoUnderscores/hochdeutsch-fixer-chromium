@@ -191,6 +191,11 @@ def run(base, tmp):
         for word in ['Die für die', 'Flüssigkeit', 'Dewargefäß', 'verschließbaren', 'Größe der Zelle', 'Fahrrad steht auf dem']:
             check(f'LaTeX: text layer reads "{word}"', word in text)
         check('LaTeX: no accents on their own left', '¨' not in text)
+        # Computer Modern: the accent placed over its letter, taking no room
+        b.open(base + 'latex-cm.pdf'); time.sleep(3)
+        text = b.js(TEXT)
+        for word in ['zugehörigen Messgrößen (z.', 'die beiden Größen nicht']:
+            check(f'LaTeX (Computer Modern): text layer reads "{word}"', word in text)
         # small print: letter-spaced (pdf.js reads "V e l o"), footnotes, tiny text, a table, a margin note
         for f in ['spaced.pdf', 'smallprint.pdf', 'words.pdf']:
             b.open(base + f); time.sleep(3)
